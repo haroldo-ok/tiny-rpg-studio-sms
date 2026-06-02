@@ -458,8 +458,11 @@ void init_graphics(void) {
     SMS_loadBGPalette(res_ptr(res_find("main.pal")));
     SMS_loadSpritePalette(res_ptr(res_find("main.pal")));
 
-    /* Load BG + sprite tiles */
-    SMS_loadTiles(res_ptr(res_find("main.til")), 4, 512 * 32);
+    /* Load BG + sprite tiles (use actual file size, not hardcoded) */
+    {
+        res_entry_t *til_entry = res_find("main.til");
+        SMS_loadTiles(res_ptr(til_entry), 4, til_entry ? til_entry->size : 0);
+    }
 
     g_tile_attrs = res_find("main.atr");
 }
