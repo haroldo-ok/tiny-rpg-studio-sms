@@ -294,12 +294,14 @@ void wait_button_release() {
 
 /* ─────────────────────────────────────────────
    NPC system
-   VRAM first-half slot layout:
+   VRAM slot layout (first-half sprite tiles):
      8-23:  player   (base_tile=8)
      24-39: NPC type 0 (base_tile=24)
      40-55: NPC type 1 (base_tile=40)
      56-71: NPC type 2 (base_tile=56)
      72-87: NPC type 3 (base_tile=72)
+   entities.dat: byte 0 = npc_count,
+   then 4 bytes per NPC: room, x, y, sprite_type
    ───────────────────────────────────────────── */
 #define MAX_NPC_SPRITE_TYPES (4)
 #define MAX_NPCS (16)
@@ -312,8 +314,8 @@ typedef struct {
 	unsigned char sprite_type;
 } npc_t;
 
-static npc_t    npc_data[MAX_NPCS];
-static actor    npc_actors[MAX_NPCS];
+static npc_t         npc_data[MAX_NPCS];
+static actor         npc_actors[MAX_NPCS];
 static unsigned char npc_count;
 
 static void load_entities(void) {
@@ -366,38 +368,25 @@ char gameplay_loop() {
 	
 	while (1) {
 		initialize_graphics();
-		SMS_displayOn();
-		SMS_setNextTileatXY(0,0); puts("1:initOK ");
-		SMS_waitForVBlank();
 
 		load_entities();
-		SMS_setNextTileatXY(0,0); puts("2:entOK  ");
-		SMS_waitForVBlank();
 		{
 		resource_entry_format *til_e = resource_find("main.til");
 		if (til_e && til_e->size > 0) {
 			SMS_loadTiles(resource_get_pointer(til_e), 4, til_e->size);
 		}
 	}
-		SMS_setNextTileatXY(0,0); puts("3:tilOK  ");
-		SMS_waitForVBlank();
 		
 		tile_attrs = resource_find("main.atr");
 		tile_combinations = resource_find("merging.dat");
-		SMS_setNextTileatXY(0,0); puts("4:resOK  ");
-		SMS_waitForVBlank();
 		
 		resource_map_format *map = load_map(map_number);
 		if (!map) {
 			map_number = 1;
 			map = load_map(map_number);
 		}
-		SMS_setNextTileatXY(0,0); puts("5:mapOK  ");
-		SMS_waitForVBlank();
 		prepare_map_data(map);
 		draw_map(map);
-		SMS_setNextTileatXY(0,0); puts("6:drawOK ");
-		SMS_waitForVBlank();
 
 		SMS_setNextTileatXY(2, 1);
 		puts("Press button to skip map");
@@ -413,11 +402,7 @@ char gameplay_loop() {
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
 		player_find_start(map);
-		SMS_setNextTileatXY(0,0); puts("7:plyrOK ");
-		SMS_waitForVBlank();
 		init_npc_actors((unsigned char)(map_number - 1));
-		SMS_setNextTileatXY(0,0); puts("8:npcOK  ");
-		SMS_waitForVBlank();
 
 		stage_clear = 0;
 		is_map_data_dirty = 0;
