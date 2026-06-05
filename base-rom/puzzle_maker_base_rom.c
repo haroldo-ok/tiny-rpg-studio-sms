@@ -366,25 +366,38 @@ char gameplay_loop() {
 	
 	while (1) {
 		initialize_graphics();
+		SMS_displayOn();
+		SMS_setNextTileatXY(0,0); puts("1:initOK ");
+		SMS_waitForVBlank();
 
 		load_entities();
+		SMS_setNextTileatXY(0,0); puts("2:entOK  ");
+		SMS_waitForVBlank();
 		{
 		resource_entry_format *til_e = resource_find("main.til");
 		if (til_e && til_e->size > 0) {
 			SMS_loadTiles(resource_get_pointer(til_e), 4, til_e->size);
 		}
 	}
+		SMS_setNextTileatXY(0,0); puts("3:tilOK  ");
+		SMS_waitForVBlank();
 		
 		tile_attrs = resource_find("main.atr");
 		tile_combinations = resource_find("merging.dat");
+		SMS_setNextTileatXY(0,0); puts("4:resOK  ");
+		SMS_waitForVBlank();
 		
 		resource_map_format *map = load_map(map_number);
 		if (!map) {
 			map_number = 1;
 			map = load_map(map_number);
 		}
+		SMS_setNextTileatXY(0,0); puts("5:mapOK  ");
+		SMS_waitForVBlank();
 		prepare_map_data(map);
 		draw_map(map);
+		SMS_setNextTileatXY(0,0); puts("6:drawOK ");
+		SMS_waitForVBlank();
 
 		SMS_setNextTileatXY(2, 1);
 		puts("Press button to skip map");
@@ -400,7 +413,11 @@ char gameplay_loop() {
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
 		player_find_start(map);
+		SMS_setNextTileatXY(0,0); puts("7:plyrOK ");
+		SMS_waitForVBlank();
 		init_npc_actors((unsigned char)(map_number - 1));
+		SMS_setNextTileatXY(0,0); puts("8:npcOK  ");
+		SMS_waitForVBlank();
 
 		stage_clear = 0;
 		is_map_data_dirty = 0;
