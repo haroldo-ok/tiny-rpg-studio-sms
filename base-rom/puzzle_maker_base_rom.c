@@ -292,6 +292,71 @@ void wait_button_release() {
 	} while ((joy & (PORT_A_KEY_1 | PORT_A_KEY_2 | PORT_B_KEY_1 | PORT_B_KEY_2)));
 }
 
+/* ─────────────────────────────────────────────
+   NPC system
+   VRAM first-half slot layout:
+     8-23:  player   (base_tile=8)
+     24-39: NPC type 0 (base_tile=24)
+     40-55: NPC type 1 (base_tile=40)
+     56-71: NPC type 2 (base_tile=56)
+     72-87: NPC type 3 (base_tile=72)
+   ───────────────────────────────────────────── */
+#define MAX_NPC_SPRITE_TYPES (4)
+#define MAX_NPCS (16)
+#define NPC_BASE_TILE(t) ((unsigned char)(8 + 16 + (unsigned char)(t) * 16))
+
+typedef struct {
+	unsigned char room;
+	unsigned char x;
+	unsigned char y;
+	unsigned char sprite_type;
+} npc_t;
+
+static npc_t    npc_data[MAX_NPCS];
+static actor    npc_actors[MAX_NPCS];
+static unsigned char npc_count;
+
+static void load_entities(void) {
+	unsigned char i;
+	unsigned char *p;
+	resource_entry_format *e = resource_find("entities.dat");
+	npc_count = 0;
+	if (!e || !e->size) return;
+	p = (unsigned char *)resource_get_pointer(e);
+	if (!p) return;
+	npc_count = p[0];
+	if (npc_count > MAX_NPCS) npc_count = MAX_NPCS;
+	for (i = 0; i < npc_count; i++) {
+		npc_data[i].room        = p[1 + i*4 + 0];
+		npc_data[i].x           = p[1 + i*4 + 1];
+		npc_data[i].y           = p[1 + i*4 + 2];
+		npc_data[i].sprite_type = p[1 + i*4 + 3];
+		if (npc_data[i].room >= 9) npc_data[i].room = 0;
+		if (npc_data[i].x >= 8)   npc_data[i].x    = 0;
+		if (npc_data[i].y >= 8)   npc_data[i].y    = 0;
+		if (npc_data[i].sprite_type >= MAX_NPC_SPRITE_TYPES)
+			npc_data[i].sprite_type = 0;
+		npc_actors[i].active = 0;
+	}
+}
+
+static void init_npc_actors(unsigned char room_idx) {
+	unsigned char i;
+	for (i = 0; i < npc_count; i++) {
+		if (npc_data[i].room != room_idx) {
+			npc_actors[i].active = 0;
+			continue;
+		}
+		init_actor(&npc_actors[i],
+			npc_data[i].x << 4,
+			(npc_data[i].y << 4) + (MAP_SCREEN_Y << 3),
+			2, 1,
+			NPC_BASE_TILE(npc_data[i].sprite_type),
+			2);
+	}
+}
+
+
 char gameplay_loop() {
 	unsigned int joy = SMS_getKeysStatus();
 	unsigned int joy_prev = 0;
@@ -302,7 +367,13 @@ char gameplay_loop() {
 	while (1) {
 		initialize_graphics();
 
-		SMS_loadTiles(resource_get_pointer(resource_find("main.til")), 4, 256 * 32);
+		load_entities();
+		{
+		resource_entry_format *til_e = resource_find("main.til");
+		if (til_e && til_e->size > 0) {
+			SMS_loadTiles(resource_get_pointer(til_e), 4, til_e->size);
+		}
+	}
 		
 		tile_attrs = resource_find("main.atr");
 		tile_combinations = resource_find("merging.dat");
@@ -329,6 +400,7 @@ char gameplay_loop() {
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
 		player_find_start(map);
+		init_npc_actors((unsigned char)(map_number - 1));
 
 		stage_clear = 0;
 		is_map_data_dirty = 0;
@@ -355,6 +427,13 @@ char gameplay_loop() {
 			
 			SMS_initSprites();
 			draw_actor(&player);
+			{
+				unsigned char _i;
+				for (_i = 0; _i < npc_count; _i++) {
+					if (npc_data[_i].room == (unsigned char)(map_number - 1))
+						draw_actor(&npc_actors[_i]);
+				}
+			}
 			SMS_finalizeSprites();	
 			
 			SMS_waitForVBlank();
