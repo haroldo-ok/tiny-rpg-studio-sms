@@ -292,6 +292,92 @@ void wait_button_release() {
 	} while ((joy & (PORT_A_KEY_1 | PORT_A_KEY_2 | PORT_B_KEY_1 | PORT_B_KEY_2)));
 }
 
+#define MAX_NPC_SPRITE_TYPES (4)
+#define MAX_NPCS (16)
+#define NPC_DIALOG_LEN (36)
+#define NPC_BASE_TILE(t) ((unsigned char)(8 + 16 + (unsigned char)(t) * 16))
+
+typedef struct {
+	unsigned char room;
+	unsigned char x;
+	unsigned char y;
+	unsigned char sprite_type;
+	char          dialog[NPC_DIALOG_LEN];
+} npc_t;
+
+static npc_t         npc_data[MAX_NPCS];
+static actor         npc_actors[MAX_NPCS];
+static unsigned char npc_count;
+static char          dialog_active;
+
+static void load_entities(void) {
+	unsigned char i;
+	unsigned char *p;
+	resource_entry_format *e = resource_find("entities.dat");
+	npc_count = 0;
+	dialog_active = 0;
+	if (!e || !e->size) return;
+	p = (unsigned char *)resource_get_pointer(e);
+	if (!p) return;
+	npc_count = p[0];
+	if (npc_count > MAX_NPCS) npc_count = MAX_NPCS;
+	for (i = 0; i < npc_count; i++) {
+		unsigned char *base = p + 1 + (unsigned int)i * (4 + NPC_DIALOG_LEN);
+		npc_data[i].room        = base[0];
+		npc_data[i].x           = base[1];
+		npc_data[i].y           = base[2];
+		npc_data[i].sprite_type = base[3];
+		if (npc_data[i].room >= 9) npc_data[i].room = 0;
+		if (npc_data[i].x >= 8)   npc_data[i].x    = 0;
+		if (npc_data[i].y >= 8)   npc_data[i].y    = 0;
+		if (npc_data[i].sprite_type >= MAX_NPC_SPRITE_TYPES)
+			npc_data[i].sprite_type = 0;
+		memcpy(npc_data[i].dialog, (char *)(base + 4), NPC_DIALOG_LEN);
+		npc_data[i].dialog[NPC_DIALOG_LEN - 1] = 0;
+		npc_actors[i].active = 0;
+	}
+}
+
+static void show_npc_dialog(char *text) {
+	unsigned char i;
+	for (i = 0; i < 32; i++) SMS_setTileatXY(i, 21, 0);
+	SMS_setNextTileatXY(0, 21);
+	puts(text);
+	dialog_active = 1;
+}
+
+static void close_npc_dialog(void) {
+	unsigned char i;
+	for (i = 0; i < 32; i++) SMS_setTileatXY(i, 21, 0);
+	dialog_active = 0;
+}
+
+static unsigned char find_npc_at(unsigned char room, unsigned char x, unsigned char y) {
+	unsigned char i;
+	for (i = 0; i < npc_count; i++) {
+		if (npc_data[i].room == room && npc_data[i].x == x && npc_data[i].y == y)
+			return (unsigned char)(i + 1);
+	}
+	return 0;
+}
+
+static void init_npc_actors(unsigned char room_idx) {
+	unsigned char i;
+	for (i = 0; i < npc_count; i++) {
+		if (npc_data[i].room != room_idx) {
+			npc_actors[i].active = 0;
+			continue;
+		}
+		init_actor(&npc_actors[i],
+			npc_data[i].x << 4,
+			(npc_data[i].y << 4) + (MAP_SCREEN_Y << 3),
+			2, 1,
+			NPC_BASE_TILE(npc_data[i].sprite_type),
+			2);
+	}
+}
+
+
 char gameplay_loop() {
 	unsigned int joy = SMS_getKeysStatus();
 	unsigned int joy_prev = 0;
@@ -302,7 +388,13 @@ char gameplay_loop() {
 	while (1) {
 		initialize_graphics();
 
-		SMS_loadTiles(resource_get_pointer(resource_find("main.til")), 4, 256 * 32);
+		load_entities();
+		{
+		resource_entry_format *til_e = resource_find("main.til");
+		if (til_e && til_e->size > 0) {
+			SMS_loadTiles(resource_get_pointer(til_e), 4, til_e->size);
+		}
+	}
 		
 		tile_attrs = resource_find("main.atr");
 		tile_combinations = resource_find("merging.dat");
@@ -329,6 +421,7 @@ char gameplay_loop() {
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
 		player_find_start(map);
+		init_npc_actors((unsigned char)(map_number - 1));
 
 		stage_clear = 0;
 		is_map_data_dirty = 0;
@@ -340,14 +433,30 @@ char gameplay_loop() {
 				char ply_map_x = get_actor_map_x(&player);
 				char ply_map_y = get_actor_map_y(&player);
 				
-				if (joy & PORT_A_KEY_UP) {
-					try_moving_actor_on_map(&player, map, 0, -1);
-				} else if (joy & PORT_A_KEY_DOWN) {
-					try_moving_actor_on_map(&player, map, 0, 1);
-				} else if (joy & PORT_A_KEY_LEFT) {
-					try_moving_actor_on_map(&player, map, -1, 0);
-				} else if (joy & PORT_A_KEY_RIGHT) {
-					try_moving_actor_on_map(&player, map, 1, 0);
+				if (dialog_active) {
+					if (joy) close_npc_dialog();
+				} else {
+					signed char _dx, _dy;
+					unsigned char _room, _px, _py, _tx, _ty, _ni;
+					_dx = 0; _dy = 0;
+					if      (joy & PORT_A_KEY_UP)    _dy = -1;
+					else if (joy & PORT_A_KEY_DOWN)  _dy =  1;
+					else if (joy & PORT_A_KEY_LEFT)  _dx = -1;
+					else if (joy & PORT_A_KEY_RIGHT) _dx =  1;
+					if (_dx || _dy) {
+						_room = (unsigned char)(map_number - 1);
+						_px = (unsigned char)get_actor_map_x(&player);
+						_py = (unsigned char)get_actor_map_y(&player);
+						_tx = (unsigned char)(_px + _dx);
+						_ty = (unsigned char)(_py + _dy);
+						_ni = find_npc_at(_room, _tx, _ty);
+						if (_ni) {
+							if (npc_data[_ni-1].dialog[0])
+								show_npc_dialog(npc_data[_ni-1].dialog);
+						} else {
+							try_moving_actor_on_map(&player, map, _dx, _dy);
+						}
+					}
 				}
 				
 				joy_delay = 8;
@@ -355,6 +464,13 @@ char gameplay_loop() {
 			
 			SMS_initSprites();
 			draw_actor(&player);
+			{
+				unsigned char _i;
+				for (_i = 0; _i < npc_count; _i++) {
+					if (npc_data[_i].room == (unsigned char)(map_number - 1))
+						draw_actor(&npc_actors[_i]);
+				}
+			}
 			SMS_finalizeSprites();	
 			
 			SMS_waitForVBlank();
