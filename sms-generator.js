@@ -306,16 +306,24 @@ async function generateSMSRom() {
            per NPC: room(1) x(1) y(1) sprite_type(1)
         */
         setStatus('Building entity data…', '#8af');
+        // entities.dat: byte 0 = npc_count, then per NPC: room(1)+x(1)+y(1)+sprite_type(1)+dialog[36]
+        const NPC_DIALOG_LEN = 36;
         const entBuf = [Math.min(placedNpcs.length, 31)];
         for (let i = 0; i < Math.min(placedNpcs.length, 31); i++) {
             const npc = placedNpcs[i];
             const t   = npc.type || 'default';
             const si  = typeToIdx.has(t) ? typeToIdx.get(t) : 0;
+            // Dialog text: use npc.text, truncated to 35 chars
+            const rawText = (npc.text || '').slice(0, NPC_DIALOG_LEN - 1);
+            const dialogBytes = new Array(NPC_DIALOG_LEN).fill(0);
+            for (let c = 0; c < rawText.length; c++)
+                dialogBytes[c] = rawText.charCodeAt(c) & 0xFF;
             entBuf.push(
                 (npc.roomIndex || 0) & 0xFF,
                 (npc.x || 0) & 0xFF,
                 (npc.y || 0) & 0xFF,
-                si & 0xFF
+                si & 0xFF,
+                ...dialogBytes
             );
         }
 
