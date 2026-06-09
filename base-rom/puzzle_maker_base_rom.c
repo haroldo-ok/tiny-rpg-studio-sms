@@ -525,11 +525,15 @@ char gameplay_loop() {
 			SMS_finalizeSprites();	
 			
 						SMS_waitForVBlank();
-			SMS_copySpritestoSAT();	
-			
+			SMS_copySpritestoSAT();
+			/* Draw map during VBlank if dirty (guaranteed safe VRAM write window) */
 			if (is_map_data_dirty) {
 				resource_map_format *cur_map = load_map(map_number);
-				if (cur_map) draw_map(cur_map);
+				if (cur_map) {
+					SMS_displayOff();
+					draw_map(cur_map);
+					SMS_displayOn();
+				}
 				is_map_data_dirty = 0;
 			}
 			
