@@ -311,13 +311,33 @@ static unsigned char npc_count;
 static char          dialog_active;
 static unsigned char world_cols;
 static unsigned char world_rows;
-
 static void load_entities(void) {
 	unsigned char i;
 	unsigned char *p;
-	resource_entry_format *e = resource_find("entities.dat");
+	resource_entry_format *e;
+
 	npc_count = 0;
 	dialog_active = 0;
+	world_cols = 3;
+	world_rows = 3;
+
+	/* Read world dimensions from project.inf first (independent of entities.dat) */
+	{
+		unsigned char *pinf;
+		resource_entry_format *einf = resource_find("project.inf");
+		if (einf && einf->size > 0) {
+			pinf = (unsigned char *)resource_get_pointer(einf);
+			if (pinf) {
+				while (*pinf) pinf++; pinf++;
+				while (*pinf) pinf++; pinf++;
+				while (*pinf) pinf++; pinf++;
+				if (pinf[0]) world_cols = pinf[0];
+				if (pinf[1]) world_rows = pinf[1];
+			}
+		}
+	}
+
+	e = resource_find("entities.dat");
 	if (!e || !e->size) return;
 	p = (unsigned char *)resource_get_pointer(e);
 	if (!p) return;
@@ -352,25 +372,6 @@ static void close_npc_dialog(void) {
 	unsigned char i;
 	for (i = 0; i < 32; i++) SMS_setTileatXY(i, 21, 0);
 	dialog_active = 0;
-
-	/* Read world dimensions from project.inf (appended after title string) */
-	{
-		unsigned char *pinf;
-		resource_entry_format *einf = resource_find("project.inf");
-		world_cols = 3;
-		world_rows = 3;
-		if (einf && einf->size > 0) {
-			pinf = (unsigned char *)resource_get_pointer(einf);
-			if (pinf) {
-				/* skip tool_name\0, version\0, title\0 */
-				while (*pinf) pinf++; pinf++; /* skip tool_name */
-				while (*pinf) pinf++; pinf++; /* skip version */
-				while (*pinf) pinf++; pinf++; /* skip title */
-				if (pinf[0]) world_cols = pinf[0];
-				if (pinf[1]) world_rows = pinf[1];
-			}
-		}
-	}
 }
 
 static unsigned char find_npc_at(unsigned char room, unsigned char x, unsigned char y) {
@@ -488,8 +489,9 @@ char gameplay_loop() {
 								if (_dx > 0) { nb_col++; wrap_x = 0; }
 								if (_dy < 0) { nb_row--; wrap_y = 7; }
 								if (_dy > 0) { nb_row++; wrap_y = 0; }
-								if (nb_row >= 0 && (unsigned char)nb_row < world_rows &&
-								    nb_col >= 0 && (unsigned char)nb_col < world_cols) {
+								/* Debug: store nb_row, nb_col into npc index slot for inspection */
+								/* Cast nb_row/nb_col to unsigned for the bounds check since SDCC treats char as unsigned */
+								if ((unsigned char)nb_row < world_rows && (unsigned char)nb_col < world_cols) {
 									/* Valid neighbour: transition to it */
 									map_number = (unsigned char)nb_row * world_cols + (unsigned char)nb_col + 1;
 									map = load_map(map_number);
@@ -522,7 +524,7 @@ char gameplay_loop() {
 			}
 			SMS_finalizeSprites();	
 			
-			SMS_waitForVBlank();
+						SMS_waitForVBlank();
 			SMS_copySpritestoSAT();	
 			
 			if (is_map_data_dirty) draw_map(map);
