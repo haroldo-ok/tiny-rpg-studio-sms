@@ -476,16 +476,17 @@ char gameplay_loop() {
 								show_npc_dialog(npc_data[_ni-1].dialog);
 						} else {
 							/* Check for world edge crossing (TRS MovementManager logic) */
-							if (_tx >= map->width || _ty >= map->height) {
+							/* Use constant room size (always 8x8 in TRS) — avoids bank-mapping issues */
+							if (_tx >= 8 || _ty >= 8) {
 								/* Edge crossing: compute neighbour room */
 								unsigned char cur_room = (unsigned char)(map_number - 1);
 								unsigned char cur_row  = cur_room / world_cols;
 								unsigned char cur_col  = cur_room % world_cols;
 								char nb_row = (char)cur_row, nb_col = (char)cur_col;
 								unsigned char wrap_x = _px, wrap_y = _py;
-								if (_dx < 0) { nb_col--; wrap_x = map->width  - 1; }
+								if (_dx < 0) { nb_col--; wrap_x = 7; }
 								if (_dx > 0) { nb_col++; wrap_x = 0; }
-								if (_dy < 0) { nb_row--; wrap_y = map->height - 1; }
+								if (_dy < 0) { nb_row--; wrap_y = 7; }
 								if (_dy > 0) { nb_row++; wrap_y = 0; }
 								if (nb_row >= 0 && (unsigned char)nb_row < world_rows &&
 								    nb_col >= 0 && (unsigned char)nb_col < world_cols) {
