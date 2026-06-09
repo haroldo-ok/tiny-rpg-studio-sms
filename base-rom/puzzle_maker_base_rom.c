@@ -309,6 +309,8 @@ static npc_t         npc_data[MAX_NPCS];
 static actor         npc_actors[MAX_NPCS];
 static unsigned char npc_count;
 static char          dialog_active;
+static unsigned char world_cols;
+static unsigned char world_rows;
 
 static void load_entities(void) {
 	unsigned char i;
@@ -350,6 +352,25 @@ static void close_npc_dialog(void) {
 	unsigned char i;
 	for (i = 0; i < 32; i++) SMS_setTileatXY(i, 21, 0);
 	dialog_active = 0;
+
+	/* Read world dimensions from project.inf (appended after title string) */
+	{
+		unsigned char *pinf;
+		resource_entry_format *einf = resource_find("project.inf");
+		world_cols = 3;
+		world_rows = 3;
+		if (einf && einf->size > 0) {
+			pinf = (unsigned char *)resource_get_pointer(einf);
+			if (pinf) {
+				/* skip tool_name\0, version\0, title\0 */
+				while (*pinf) pinf++; pinf++; /* skip tool_name */
+				while (*pinf) pinf++; pinf++; /* skip version */
+				while (*pinf) pinf++; pinf++; /* skip title */
+				if (pinf[0]) world_cols = pinf[0];
+				if (pinf[1]) world_rows = pinf[1];
+			}
+		}
+	}
 }
 
 static unsigned char find_npc_at(unsigned char room, unsigned char x, unsigned char y) {
@@ -454,7 +475,34 @@ char gameplay_loop() {
 							if (npc_data[_ni-1].dialog[0])
 								show_npc_dialog(npc_data[_ni-1].dialog);
 						} else {
-							try_moving_actor_on_map(&player, map, _dx, _dy);
+							/* Check for world edge crossing (TRS MovementManager logic) */
+							if (_tx >= map->width || _ty >= map->height) {
+								/* Edge crossing: compute neighbour room */
+								unsigned char cur_room = (unsigned char)(map_number - 1);
+								unsigned char cur_row  = cur_room / world_cols;
+								unsigned char cur_col  = cur_room % world_cols;
+								char nb_row = (char)cur_row, nb_col = (char)cur_col;
+								unsigned char wrap_x = _px, wrap_y = _py;
+								if (_dx < 0) { nb_col--; wrap_x = map->width  - 1; }
+								if (_dx > 0) { nb_col++; wrap_x = 0; }
+								if (_dy < 0) { nb_row--; wrap_y = map->height - 1; }
+								if (_dy > 0) { nb_row++; wrap_y = 0; }
+								if (nb_row >= 0 && (unsigned char)nb_row < world_rows &&
+								    nb_col >= 0 && (unsigned char)nb_col < world_cols) {
+									/* Valid neighbour: transition to it */
+									map_number = (unsigned char)nb_row * world_cols + (unsigned char)nb_col + 1;
+									map = load_map(map_number);
+									if (map) {
+										prepare_map_data(map);
+										draw_map(map);
+										set_actor_map_xy(&player, wrap_x, wrap_y);
+										init_npc_actors((unsigned char)(map_number - 1));
+									}
+								}
+								/* (if no neighbour, player stays — same as TRS clamping) */
+							} else {
+								try_moving_actor_on_map(&player, map, _dx, _dy);
+							}
 						}
 					}
 				}

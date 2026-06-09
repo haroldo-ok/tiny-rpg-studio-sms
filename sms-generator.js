@@ -328,7 +328,10 @@ async function generateSMSRom() {
         }
 
         /* ── project.inf / merging.dat ── */
-        const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title)];
+        const worldCols = (gameData.world && gameData.world.cols) ? Math.max(1, gameData.world.cols) : 3;
+        const worldRows = (gameData.world && gameData.world.rows) ? Math.max(1, gameData.world.rows) : 3;
+        const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title),
+            worldCols & 0xFF, worldRows & 0xFF];
         const totalTN = startTileNum;
         const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
 
