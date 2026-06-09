@@ -497,9 +497,9 @@ char gameplay_loop() {
 									map = load_map(map_number);
 									if (map) {
 										prepare_map_data(map);
-										draw_map(map);
 										set_actor_map_xy(&player, wrap_x, wrap_y);
 										init_npc_actors((unsigned char)(map_number - 1));
+										is_map_data_dirty = 1;
 									}
 								}
 								/* (if no neighbour, player stays — same as TRS clamping) */
@@ -527,7 +527,11 @@ char gameplay_loop() {
 						SMS_waitForVBlank();
 			SMS_copySpritestoSAT();	
 			
-			if (is_map_data_dirty) draw_map(map);
+			if (is_map_data_dirty) {
+				resource_map_format *cur_map = load_map(map_number);
+				if (cur_map) draw_map(cur_map);
+				is_map_data_dirty = 0;
+			}
 			
 			joy_prev = joy;
 			joy = SMS_getKeysStatus();
