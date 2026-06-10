@@ -429,16 +429,6 @@ char gameplay_loop() {
 		prepare_map_data(map);
 		draw_map(map);
 
-		SMS_setNextTileatXY(2, 1);
-		puts("Press button to skip map");
-
-		SMS_setNextTileatXY(2, 2);
-		puts(map->name);
-
-		SMS_setNextTileatXY(22, 3);
-		puts("next ===>");
-		
-
 		SMS_displayOn();
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
@@ -529,17 +519,13 @@ char gameplay_loop() {
 			/* Draw map during VBlank if dirty (guaranteed safe VRAM write window) */
 			if (is_map_data_dirty) {
 				resource_map_format *cur_map = load_map(map_number);
-				if (cur_map) {
-					SMS_displayOff();
-					draw_map(cur_map);
-					SMS_displayOn();
-				}
+				if (cur_map) draw_map(cur_map);
 				is_map_data_dirty = 0;
 			}
 			
 			joy_prev = joy;
 			joy = SMS_getKeysStatus();
-		} while (!stage_clear && !(joy & (PORT_A_KEY_1 | PORT_A_KEY_2 | PORT_B_KEY_1 | PORT_B_KEY_2)));
+		} while (!stage_clear);
 		
 		map_number++;
 
