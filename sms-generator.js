@@ -264,7 +264,10 @@ async function generateSMSRom() {
            Placed in the map at the player's starting cell.
         */
         const startTileNum = maxTileNum + 1;
-        const startTm = api.getTileMap(startRoom);
+        // BUG WORKAROUND: api.getTileMap() doesn't forward roomIndex; read maps directly.
+        const tilesetMaps = (gameData.tileset && Array.isArray(gameData.tileset.maps))
+            ? gameData.tileset.maps : [];
+        const startTm = tilesetMaps[startRoom] || null;
         const startGround = startTm && startTm.ground;
         const startTid = (startGround && startGround[startY] && startGround[startY][startX] != null)
             ? startGround[startY][startX] : null;
