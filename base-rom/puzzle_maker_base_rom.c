@@ -309,13 +309,35 @@ static npc_t         npc_data[MAX_NPCS];
 static actor         npc_actors[MAX_NPCS];
 static unsigned char npc_count;
 static char          dialog_active;
-
+static unsigned char world_cols;
+static unsigned char world_rows;
 static void load_entities(void) {
 	unsigned char i;
 	unsigned char *p;
-	resource_entry_format *e = resource_find("entities.dat");
+	resource_entry_format *e;
+
 	npc_count = 0;
 	dialog_active = 0;
+	world_cols = 3;
+	world_rows = 3;
+
+	/* Read world dimensions from project.inf first (independent of entities.dat) */
+	{
+		unsigned char *pinf;
+		resource_entry_format *einf = resource_find("project.inf");
+		if (einf && einf->size > 0) {
+			pinf = (unsigned char *)resource_get_pointer(einf);
+			if (pinf) {
+				while (*pinf) pinf++; pinf++;
+				while (*pinf) pinf++; pinf++;
+				while (*pinf) pinf++; pinf++;
+				if (pinf[0]) world_cols = pinf[0];
+				if (pinf[1]) world_rows = pinf[1];
+			}
+		}
+	}
+
+	e = resource_find("entities.dat");
 	if (!e || !e->size) return;
 	p = (unsigned char *)resource_get_pointer(e);
 	if (!p) return;
@@ -407,16 +429,6 @@ char gameplay_loop() {
 		prepare_map_data(map);
 		draw_map(map);
 
-		SMS_setNextTileatXY(2, 1);
-		puts("Press button to skip map");
-
-		SMS_setNextTileatXY(2, 2);
-		puts(map->name);
-
-		SMS_setNextTileatXY(22, 3);
-		puts("next ===>");
-		
-
 		SMS_displayOn();
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
@@ -454,7 +466,36 @@ char gameplay_loop() {
 							if (npc_data[_ni-1].dialog[0])
 								show_npc_dialog(npc_data[_ni-1].dialog);
 						} else {
-							try_moving_actor_on_map(&player, map, _dx, _dy);
+							/* Check for world edge crossing (TRS MovementManager logic) */
+							/* Use constant room size (always 8x8 in TRS) — avoids bank-mapping issues */
+							if (_tx >= 8 || _ty >= 8) {
+								/* Edge crossing: compute neighbour room */
+								unsigned char cur_room = (unsigned char)(map_number - 1);
+								unsigned char cur_row  = cur_room / world_cols;
+								unsigned char cur_col  = cur_room % world_cols;
+								char nb_row = (char)cur_row, nb_col = (char)cur_col;
+								unsigned char wrap_x = _px, wrap_y = _py;
+								if (_dx < 0) { nb_col--; wrap_x = 7; }
+								if (_dx > 0) { nb_col++; wrap_x = 0; }
+								if (_dy < 0) { nb_row--; wrap_y = 7; }
+								if (_dy > 0) { nb_row++; wrap_y = 0; }
+								/* Debug: store nb_row, nb_col into npc index slot for inspection */
+								/* Cast nb_row/nb_col to unsigned for the bounds check since SDCC treats char as unsigned */
+								if ((unsigned char)nb_row < world_rows && (unsigned char)nb_col < world_cols) {
+									/* Valid neighbour: transition to it */
+									map_number = (unsigned char)nb_row * world_cols + (unsigned char)nb_col + 1;
+									map = load_map(map_number);
+									if (map) {
+										prepare_map_data(map);
+										set_actor_map_xy(&player, wrap_x, wrap_y);
+										init_npc_actors((unsigned char)(map_number - 1));
+										is_map_data_dirty = 1;
+									}
+								}
+								/* (if no neighbour, player stays — same as TRS clamping) */
+							} else {
+								try_moving_actor_on_map(&player, map, _dx, _dy);
+							}
 						}
 					}
 				}
@@ -473,14 +514,18 @@ char gameplay_loop() {
 			}
 			SMS_finalizeSprites();	
 			
-			SMS_waitForVBlank();
-			SMS_copySpritestoSAT();	
-			
-			if (is_map_data_dirty) draw_map(map);
+						SMS_waitForVBlank();
+			SMS_copySpritestoSAT();
+			/* Draw map during VBlank if dirty (guaranteed safe VRAM write window) */
+			if (is_map_data_dirty) {
+				resource_map_format *cur_map = load_map(map_number);
+				if (cur_map) draw_map(cur_map);
+				is_map_data_dirty = 0;
+			}
 			
 			joy_prev = joy;
 			joy = SMS_getKeysStatus();
-		} while (!stage_clear && !(joy & (PORT_A_KEY_1 | PORT_A_KEY_2 | PORT_B_KEY_1 | PORT_B_KEY_2)));
+		} while (!stage_clear);
 		
 		map_number++;
 

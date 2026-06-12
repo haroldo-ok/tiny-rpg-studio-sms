@@ -264,7 +264,10 @@ async function generateSMSRom() {
            Placed in the map at the player's starting cell.
         */
         const startTileNum = maxTileNum + 1;
-        const startTm = api.getTileMap(startRoom);
+        // BUG WORKAROUND: api.getTileMap() doesn't forward roomIndex; read maps directly.
+        const tilesetMaps = (gameData.tileset && Array.isArray(gameData.tileset.maps))
+            ? gameData.tileset.maps : [];
+        const startTm = tilesetMaps[startRoom] || null;
         const startGround = startTm && startTm.ground;
         const startTid = (startGround && startGround[startY] && startGround[startY][startX] != null)
             ? startGround[startY][startX] : null;
@@ -280,7 +283,7 @@ async function generateSMSRom() {
         setStatus('Encoding maps…', '#8af');
         const mapFiles = [];
         for (let r = 0; r < 9; r++) {
-            const tm = api.getTileMap(r);
+            const tm = tilesetMaps[r] || null;
             const ground  = (tm && tm.ground)  || [];
             const overlay = (tm && tm.overlay) || [];
             const bytes = [];
@@ -328,7 +331,10 @@ async function generateSMSRom() {
         }
 
         /* ── project.inf / merging.dat ── */
-        const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title)];
+        const worldCols = (gameData.world && gameData.world.cols) ? Math.max(1, gameData.world.cols) : 3;
+        const worldRows = (gameData.world && gameData.world.rows) ? Math.max(1, gameData.world.rows) : 3;
+        const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title),
+            worldCols & 0xFF, worldRows & 0xFF];
         const totalTN = startTileNum;
         const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
 
