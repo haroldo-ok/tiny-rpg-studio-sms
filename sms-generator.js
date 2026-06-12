@@ -283,7 +283,7 @@ async function generateSMSRom() {
         setStatus('Encoding maps…', '#8af');
         const mapFiles = [];
         for (let r = 0; r < 9; r++) {
-            const tm = api.getTileMap(r);
+            const tm = tilesetMaps[r] || null;
             const ground  = (tm && tm.ground)  || [];
             const overlay = (tm && tm.overlay) || [];
             const bytes = [];
