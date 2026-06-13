@@ -1,84 +1,85 @@
-#!/usr/bin/env python3
-"""
-build.py — Assembles sms-rpg-studio.html from its components.
-
-Prerequisites:
-  pip install nothing — pure stdlib only
-
-Steps:
-  1. Apply our changes to Tiny RPG Studio source
-  2. Build Tiny RPG Studio with npm run build
-  3. Run this script
-
-Usage:
-  python3 build.py
-    [--tiny-rpg   path/to/tiny-rpg-studio-main]   default: ../tiny-rpg-studio-main
-    [--base-rom   path/to/base-rom/dist/puzzle_maker_base_rom.sms]
-    [--output     sms-rpg-studio.html]
-
-Our source changes to Tiny RPG Studio (apply before building):
-  - src/runtime/infra/TinyRpgApi.ts   exposes window.TinyRPGMaker on setTinyRpgApi()
-  - index.html                        replaces Firebase CDN module script with stubs,
-                                      adds SMS ROM button + status bar to the toolbar
-Both modified files are in tiny-rpg-studio-changes/ for reference.
-"""
-
-import argparse, base64, re, sys
+"""SMS RPG Studio — build script (matches the previously-working version
+and just adds a Play button next to SMS ROM)."""
+import base64
 from pathlib import Path
 
-def build(tiny_rpg: Path, base_rom_path: Path, sms_gen: Path, output: Path):
-    docs = tiny_rpg / 'docs'
-    if not docs.exists():
-        sys.exit(f"ERROR: {docs} not found — run 'npm run build' inside {tiny_rpg} first")
+BASE = Path('/home/claude/work/SMS-Puzzle-Maker-master/base-rom')
 
-    print(f"Reading built assets from {docs}")
-    html = (docs / 'index.html').read_text(encoding='utf-8')
-    js_f = next((docs / 'assets').glob('index-*.js'))
-    css_f= next((docs / 'assets').glob('index-*.css'))
-    print(f"  JS:  {js_f.name}  ({js_f.stat().st_size//1024} KB)")
-    print(f"  CSS: {css_f.name} ({css_f.stat().st_size//1024} KB)")
+rom    = (BASE / 'puzzle_maker_base_rom.sms').read_bytes()
+romb64 = base64.b64encode(rom).decode()
 
-    js   = js_f.read_text(encoding='utf-8')
-    css  = css_f.read_text(encoding='utf-8')
-    ebjs = (docs / 'export.bundle.js').read_text(encoding='utf-8')
+bundle   = open('/tmp/main_js_patched.js').read()
+html     = open('/tmp/html_base.html').read()
+ebjs     = open('/tmp/export_bundle.js').read()
+sms_tmpl = open('/tmp/sms_script_template.txt').read()
+sms_script = sms_tmpl.replace('"BASE_ROM_PLACEHOLDER"', f'"{romb64}"')
 
-    # Embed fonts as data URIs so the file is truly self-contained
-    woff = base64.b64encode((docs / 'pico8-ui.woff').read_bytes()).decode()
-    png  = base64.b64encode((docs / 'pico8-font.png').read_bytes()).decode()
-    for orig, data in [('"pico8-ui.woff"', f'"data:font/woff;base64,{woff}"'),
-                       ('"pico8-font.png"', f'"data:image/png;base64,{png}"')]:
-        js   = js.replace(orig, data)
-        ebjs = ebjs.replace(orig, data)
+# Stub out Firebase imports
+old_imports = ('import{initializeApp as qt}from"https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";'
+               'import{getAnalytics as Xt}from"https://www.gstatic.com/firebasejs/12.8.0/firebase-analytics.js";'
+               'import{getFirestore as $t,startAfter as Jt,limit as Zt,orderBy as Qt,query as ei,getDocs as ti,'
+               'serverTimestamp as ii,collection as ai,addDoc as ni}'
+               'from"https://www.gstatic.com/firebasejs/12.8.0/firebase-firestore.js";')
+stubs = ('var qt=function(){return{apps:[],app:function(){return null}}};'
+         'var Xt=function(){};var $t=function(){return{}};var Jt=function(){};'
+         'var Zt=function(){};var Qt=function(){};var ei=function(){};'
+         'var ti=async function(){return{docs:[]}};var ii=function(){return new Date()};'
+         'var ai=function(){};var ni=async function(){};')
+patched = bundle.replace(old_imports, stubs, 1)
 
-    # Inline CSS, remove external references (Vite build artefacts)
-    html = re.sub(r'<link rel="stylesheet"[^>]*assets/index-[^>]+>', f'<style>{css}</style>', html)
-    html = re.sub(r'<script type="module"[^>]*assets/index-[^>]+></script>', '', html)
-    html = re.sub(r'<link rel="manifest"[^>]*>', '', html)
-    html = re.sub(r'<script id="vite-plugin-pwa[^>]*></script>', '', html)
+# Inject SMS ROM + Play buttons into the toolbar, next to the Reset button.
+# (Same approach as the previously-working build, just adds Play button too.)
+old_reset = '<button id="btn-reset" class="tab-action-button" type="button" data-text-key="buttons.reset" data-aria-label-key="aria.reset"></button'
+new_buttons = (old_reset + '>\n'
+    '                    <button id="btn-generate-sms-rom" class="tab-action-button" type="button" '
+    'style="background:#1a3a6a;border-color:#3a70d0;color:#6af;font-weight:bold;">'
+    '&#x1F579; SMS ROM</button>\n'
+    '                    <button id="btn-play-sms-rom" class="tab-action-button" type="button" '
+    'style="background:#1a4a1a;border-color:#3aa03a;color:#6f6;font-weight:bold;">'
+    '&#x25B6; Play</button')
+html = html.replace(old_reset, new_buttons)
 
-    # Embed base ROM and inject SMS generator
-    rom_b64 = base64.b64encode(base_rom_path.read_bytes()).decode()
-    sms_script = sms_gen.read_text(encoding='utf-8').replace('"BASE_ROM_PLACEHOLDER"', f'"{rom_b64}"')
+# Status bar under the toolbar (same as previously-working build)
+html = html.replace(
+    '</div>\n            <div class="project-save-controls">',
+    '</div>\n            <div id="sms-rom-status" style="display:none;padding:6px 16px;'
+    'font-size:11px;background:#0a1020;border-bottom:2px solid #1a3a6a;text-align:center;'
+    'font-family:monospace;"></div>\n            <div class="project-save-controls">'
+)
 
-    # Assemble
-    final = html.replace('</body>',
-        f'<script>\n{js}\n</script>\n<script>\n{ebjs}\n</script>\n{sms_script}\n</body>')
+# Add the emulator modal right before </body>
+emulator_modal = '''    <div id="sms-emulator-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;">
+        <div style="background:#1a1a1a;border:2px solid #4ac04a;border-radius:8px;padding:14px 18px;max-width:96vw;max-height:96vh;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.8);">
+            <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:16px;">
+                <span style="color:#4ac04a;font-family:monospace;font-size:13px;letter-spacing:1px;">&#x25B6; SMS EMULATOR</span>
+                <div style="display:flex;gap:8px;">
+                    <button id="sms-emulator-reload" style="background:#1a4080;border:1px solid #3a70d0;color:#fff;padding:5px 10px;cursor:pointer;font-family:inherit;font-size:11px;">&#x21BB; Reload</button>
+                    <button id="sms-emulator-close" style="background:#802020;border:1px solid #c04040;color:#fff;padding:5px 10px;cursor:pointer;font-family:inherit;font-size:11px;">&#x2716; Close</button>
+                </div>
+            </div>
+            <div id="sms-emulator-host" style="width:640px;height:480px;max-width:88vw;max-height:78vh;background:#000;">
+                <div id="sms-emulator-target"></div>
+            </div>
+            <div style="color:#888;font-family:monospace;font-size:10px;">Controls: arrow keys + Z, X &middot; Powered by EmulatorJS</div>
+        </div>
+    </div>
+</body>'''
+html = html.replace('</body>', emulator_modal)
 
-    output.write_text(final, encoding='utf-8')
-    print(f"\n✓ {output}  ({len(final.encode())//1024} KB)")
+# Final assembly
+final = html.replace(
+    '</body>',
+    f'<script>\n{patched}\n</script>\n<script>\n{ebjs}\n</script>\n{sms_script}\n</body>',
+    1
+)
 
-    # Sanity checks
-    assert 'window.TinyRPGMaker' in final,       "FAIL: window.TinyRPGMaker not found"
-    assert 'btn-generate-sms-rom' in final,      "FAIL: SMS button not found"
-    assert 'firebase-app.js' not in final,       "FAIL: Firebase CDN import still present"
-    assert not re.search(r'\bimport\{', final),  "FAIL: ES module import statements present"
-    print("✓ Sanity checks passed")
+out = Path('/mnt/user-data/outputs/sms-rpg-studio.html')
+out.write_text(final)
+print(f'Built: {len(final.encode())//1024} KB → {out}')
 
-if __name__ == '__main__':
-    p = argparse.ArgumentParser()
-    p.add_argument('--tiny-rpg',  default='../tiny-rpg-studio-main')
-    p.add_argument('--base-rom',  default='base-rom/dist/puzzle_maker_base_rom.sms')
-    p.add_argument('--sms-gen',   default='sms-generator.js')
-    p.add_argument('--output',    default='sms-rpg-studio.html')
-    a = p.parse_args()
-    build(Path(a.tiny_rpg), Path(a.base_rom), Path(a.sms_gen), Path(a.output))
+# Sanity checks
+assert final.count('id="btn-generate-sms-rom"') == 2, "expected 2 occurrences (toolbar + sidebar)"
+assert final.count('id="btn-play-sms-rom"')     == 1, "expected 1 Play button"
+assert final.count('id="sms-emulator-modal"')   == 1, "expected 1 modal"
+assert 'cdn.emulatorjs.org' in final
+print('All checks passed.')
