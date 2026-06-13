@@ -119,8 +119,11 @@
                     <button class="tab-button" type="button" data-tab="editor" role="tab" aria-selected="false" aria-controls="tab-editor" data-text-key="tabs.editor"></button>
                     <button id="btn-explore" class="tab-action-button tab-action-button--explore" type="button" data-text-key="buttons.explore">Explorar</button>
                     <button id="btn-reset" class="tab-action-button" type="button" data-text-key="buttons.reset" data-aria-label-key="aria.reset"></button>
+                    <button id="btn-generate-sms-rom" class="tab-action-button" type="button" style="background:#1a3a6a;border-color:#3a70d0;color:#6af;font-weight:bold;">&#x1F579; SMS ROM</button>
+                    <button id="btn-play-sms-rom" class="tab-action-button" type="button" style="background:#1a4a1a;border-color:#3aa03a;color:#6f6;font-weight:bold;">&#x25B6; Play</button>
                 </div>
             </div>
+            <div id="sms-rom-status" style="display:none;padding:6px 16px;font-size:11px;background:#0a1020;border-bottom:2px solid #1a3a6a;text-align:center;font-family:monospace;"></div>
             <div class="project-save-controls">
                 <button id="btn-manual-save" class="btn-manual-save" type="button" title="Manual Save" aria-label="Save project manually">Save</button>
                 <div class="history-dropdown-wrapper">
@@ -554,8 +557,7 @@
                                         <button id="btn-generate-html" data-text-key="project.generateHTML"></button>
                                         <hr style="margin:12px 0;border-color:#333">
                                         <p style="font-size:11px;color:#aaa;margin-bottom:8px;">&#x1F579; Generate a real Sega Master System ROM playable in any SMS emulator.</p>
-                                        <button id="btn-generate-sms-rom" style="background:#1a4080;border:1px solid #3a70d0;color:#fff;padding:6px 12px;cursor:pointer;font-family:inherit;font-size:12px;width:100%;margin-top:2px;">&#x1F4BE; Export SMS ROM (.sms)</button>
-                                        <button id="btn-play-sms-rom" style="background:#2a6a2a;border:1px solid #4ac04a;color:#fff;padding:6px 12px;cursor:pointer;font-family:inherit;font-size:12px;width:100%;margin-top:6px;">&#x25B6; Play in browser</button>
+                                        <button id="btn-generate-sms-rom" style="background:#1a4080;border:1px solid #3a70d0;color:#fff;padding:6px 12px;cursor:pointer;font-family:inherit;font-size:12px;width:100%;margin-top:2px;">&#x25B6; Export SMS ROM (.sms)</button>
                                         <div id="sms-rom-status" style="font-size:10px;color:#8af;margin-top:6px;display:none;"></div>
                                     </div>
                                     </div>
@@ -618,7 +620,6 @@
     </div>
 
     <!-- Carregar módulos na ordem correta -->
-    <!-- SMS Emulator Modal (added by SMS RPG Studio extension) -->
     <div id="sms-emulator-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;">
         <div style="background:#1a1a1a;border:2px solid #4ac04a;border-radius:8px;padding:14px 18px;max-width:96vw;max-height:96vh;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.8);">
             <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:16px;">
