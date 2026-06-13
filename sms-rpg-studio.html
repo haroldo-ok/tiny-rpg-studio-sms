@@ -119,10 +119,8 @@
                     <button class="tab-button" type="button" data-tab="editor" role="tab" aria-selected="false" aria-controls="tab-editor" data-text-key="tabs.editor"></button>
                     <button id="btn-explore" class="tab-action-button tab-action-button--explore" type="button" data-text-key="buttons.explore">Explorar</button>
                     <button id="btn-reset" class="tab-action-button" type="button" data-text-key="buttons.reset" data-aria-label-key="aria.reset"></button>
-                    <button id="btn-generate-sms-rom" class="tab-action-button" type="button" style="background:#1a3a6a;border-color:#3a70d0;color:#6af;font-weight:bold;">&#x1F579; SMS ROM</button>
                 </div>
             </div>
-            <div id="sms-rom-status" style="display:none;padding:6px 16px;font-size:11px;background:#0a1020;border-bottom:2px solid #1a3a6a;text-align:center;font-family:monospace;"></div>
             <div class="project-save-controls">
                 <button id="btn-manual-save" class="btn-manual-save" type="button" title="Manual Save" aria-label="Save project manually">Save</button>
                 <div class="history-dropdown-wrapper">
@@ -556,7 +554,8 @@
                                         <button id="btn-generate-html" data-text-key="project.generateHTML"></button>
                                         <hr style="margin:12px 0;border-color:#333">
                                         <p style="font-size:11px;color:#aaa;margin-bottom:8px;">&#x1F579; Generate a real Sega Master System ROM playable in any SMS emulator.</p>
-                                        <button id="btn-generate-sms-rom" style="background:#1a4080;border:1px solid #3a70d0;color:#fff;padding:6px 12px;cursor:pointer;font-family:inherit;font-size:12px;width:100%;margin-top:2px;">&#x25B6; Export SMS ROM (.sms)</button>
+                                        <button id="btn-generate-sms-rom" style="background:#1a4080;border:1px solid #3a70d0;color:#fff;padding:6px 12px;cursor:pointer;font-family:inherit;font-size:12px;width:100%;margin-top:2px;">&#x1F4BE; Export SMS ROM (.sms)</button>
+                                        <button id="btn-play-sms-rom" style="background:#2a6a2a;border:1px solid #4ac04a;color:#fff;padding:6px 12px;cursor:pointer;font-family:inherit;font-size:12px;width:100%;margin-top:6px;">&#x25B6; Play in browser</button>
                                         <div id="sms-rom-status" style="font-size:10px;color:#8af;margin-top:6px;display:none;"></div>
                                     </div>
                                     </div>
@@ -619,6 +618,22 @@
     </div>
 
     <!-- Carregar módulos na ordem correta -->
+    <!-- SMS Emulator Modal (added by SMS RPG Studio extension) -->
+    <div id="sms-emulator-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;">
+        <div style="background:#1a1a1a;border:2px solid #4ac04a;border-radius:8px;padding:14px 18px;max-width:96vw;max-height:96vh;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.8);">
+            <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:16px;">
+                <span style="color:#4ac04a;font-family:monospace;font-size:13px;letter-spacing:1px;">&#x25B6; SMS EMULATOR</span>
+                <div style="display:flex;gap:8px;">
+                    <button id="sms-emulator-reload" style="background:#1a4080;border:1px solid #3a70d0;color:#fff;padding:5px 10px;cursor:pointer;font-family:inherit;font-size:11px;">&#x21BB; Reload</button>
+                    <button id="sms-emulator-close" style="background:#802020;border:1px solid #c04040;color:#fff;padding:5px 10px;cursor:pointer;font-family:inherit;font-size:11px;">&#x2716; Close</button>
+                </div>
+            </div>
+            <div id="sms-emulator-host" style="width:640px;height:480px;max-width:88vw;max-height:78vh;background:#000;">
+                <div id="sms-emulator-target"></div>
+            </div>
+            <div style="color:#888;font-family:monospace;font-size:10px;">Controls: arrow keys + Z, X &middot; Powered by EmulatorJS</div>
+        </div>
+    </div>
 <script>
 var qt=function(){return{apps:[],app:function(){return null}}};var Xt=function(){};var $t=function(){return{}};var Jt=function(){};var Zt=function(){};var Qt=function(){};var ei=function(){};var ti=async function(){return{docs:[]}};var ii=function(){return new Date()};var ai=function(){};var ni=async function(){};(function(){const e=document.createElement("link").relList;if(e&&e.supports&&e.supports("modulepreload"))return;for(const a of document.querySelectorAll('link[rel="modulepreload"]'))i(a);new MutationObserver(a=>{for(const n of a)if(n.type==="childList")for(const r of n.addedNodes)r.tagName==="LINK"&&r.rel==="modulepreload"&&i(r)}).observe(document,{childList:!0,subtree:!0});function t(a){const n={};return a.integrity&&(n.integrity=a.integrity),a.referrerPolicy&&(n.referrerPolicy=a.referrerPolicy),a.crossOrigin==="use-credentials"?n.credentials="include":a.crossOrigin==="anonymous"?n.credentials="omit":n.credentials="same-origin",n}function i(a){if(a.ep)return;a.ep=!0;const n=t(a);fetch(a.href,n)}})();const wt={apiKey:"AIzaSyAQVJVjDKFB7GBKMBUGJ5g5Gj3dGzPIdK8",authDomain:"tiny-rpg-studio.firebaseapp.com",projectId:"tiny-rpg-studio",storageBucket:"tiny-rpg-studio.firebasestorage.app",messagingSenderId:"985096774156",appId:"1:985096774156:web:71802842fd9328f6ae0429",measurementId:"G-B56JRXPGED"};window.TinyRPGFirebaseConfig=wt;window.TinyRPGFirebaseCollection="shareUrls";const Tt=qt(wt),ri=$t(Tt);window.TinyRPGFirebaseApp=Tt;window.TinyRPGFirebaseDb=ri;window.TinyRPGFirebaseFirestore={addDoc:ni,collection:ai,serverTimestamp:ii,getDocs:ti,query:ei,orderBy:Qt,limit:Zt,startAfter:Jt};window.TinyRPGFirebaseGamesCollection="games";try{wt.measurementId&&Xt(Tt)}catch(m){console.warn("[TinyRPG] Firebase analytics unavailable.",m)}const xt="TinyRpgPico8",lt="data:font/woff;base64,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AB8AABM1MxUxNTMVMTUzFQU1MxUHNTMVMTUzFQc1MxUHNTMVAGRkZP7UZGRkZMhkZGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkAAkAAAEsASwDIAADAAcACwAPABMAFwAbAB8AIwAAEzUzFTE1MxUFNTMVBzUzFQc1MxUzNTMVBTUzFTE1MxUxNTMVZGRk/tRkZGRkZGRk/tRkZGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQAAAsAAAEsASwDIAADAAcACwAPABMAFwAbAB8AIwAnACsAABM1MxUzNTMVBTUzFTM1MxUFNTMVMTUzFTE1MxUFNTMVMzUzFQU1MxUzNTMVAGRkZP7UZGRk/tRkZGT+1GRkZP7UZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZAAAAAkAAAEsASwDIAADAAcACwAPABMAFwAbAB8AIwAAEzUzFTE1MxUxNTMVBzUzFQc1MxUHNTMVBzUzFTE1MxUxNTMVAGRkZMhkZGRkZMhkZGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQACAAAASwBLAMgAAMABwALAA8AEwAXABsAHwAAEzUzFTE1MxUxNTMVBzUzFQc1MxUHNTMVBzUzFTE1MxUAZGRkyGRkZGRkyGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZAAACgAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAABM1MxUzNTMVBTUzFTM1MxUFNTMVMTUzFQc1MxUzNTMVBTUzFTM1MxUAZGRk/tRkZGT+1GRkyGRkZP7UZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQABwAAASwBLAMgAAMABwALAA8AEwAXABsAABM1MxUHNTMVBzUzFQc1MxUHNTMVMTUzFTE1MxUAZGRkZGRkZGRkZGQCvGRkZGRkZGRkZGRkZGRkZGRkZAAAAAwAAAEsASwDIAADAAcACwAPABMAFwAbAB8AIwAnACsALwAAEzUzFTE1MxUxNTMVBTUzFTE1MxUxNTMVBTUzFTM1MxUFNTMVMzUzFQU1MxUzNTMVAGRkZP7UZGRk/tRkZGT+1GRkZP7UZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkAAAACgAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAABM1MxUxNTMVBzUzFTM1MxUFNTMVMzUzFQU1MxUzNTMVBTUzFTM1MxUAZGTIZGRk/tRkZGT+1GRkZP7UZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQACgAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAABM1MxUxNTMVBTUzFTM1MxUFNTMVMzUzFQU1MxUzNTMVBTUzFTE1MxVkZGT+1GRkZP7UZGRk/tRkZGT+1GRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQACgAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAABM1MxUxNTMVMTUzFQU1MxUzNTMVBTUzFTE1MxUxNTMVBTUzFQc1MxUAZGRk/tRkZGT+1GRkZP7UZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQAAAAACQAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjAAATNTMVBzUzFTM1MxUFNTMVMzUzFQU1MxUxNTMVBzUzFTE1MxVkZMhkZGT+1GRkZP7UZGRkZGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQACwAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAKwAAEzUzFTE1MxUxNTMVBTUzFTM1MxUFNTMVMTUzFQc1MxUzNTMVBTUzFTM1MxUAZGRk/tRkZGT+1GRkyGRkZP7UZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZAAJAAABLAEsAyAAAwAHAAsADwATABcAGwAfACMAABM1MxUxNTMVBTUzFQc1MxUxNTMVMTUzFQc1MxUFNTMVMTUzFWRkZP7UZGRkZGRkZP7UZGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQAAAAHAAABLAEsAyAAAwAHAAsADwATABcAGwAAEzUzFTE1MxUxNTMVBzUzFQc1MxUHNTMVBzUzFQBkZGTIZGRkZGRkZAK8ZGRkZGRkZGRkZGRkZGRkZGRkAAAACgAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAABM1MxUzNTMVBTUzFTM1MxUFNTMVMzUzFQU1MxUzNTMVBzUzFTE1MxUAZGRk/tRkZGT+1GRkZP7UZGRkyGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQACgAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAABM1MxUzNTMVBTUzFTM1MxUFNTMVMzUzFQU1MxUxNTMVMTUzFQc1MxUAZGRk/tRkZGT+1GRkZP7UZGRkyGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZAAADAAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAKwAvAAATNTMVMzUzFQU1MxUzNTMVBTUzFTM1MxUFNTMVMTUzFTE1MxUFNTMVMTUzFTE1MxUAZGRk/tRkZGT+1GRkZP7UZGRk/tRkZGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQAAAAJAAABLAEsAyAAAwAHAAsADwATABcAGwAfACMAABM1MxUzNTMVBTUzFTM1MxUHNTMVBzUzFTM1MxUFNTMVMzUzFQBkZGT+1GRkZMhkyGRkZP7UZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkAAAACwAAASwBLAMgAAMABwALAA8AEwAXABsAHwAjACcAKwAAEzUzFTM1MxUFNTMVMzUzFQU1MxUxNTMVMTUzFQc1MxUFNTMVMTUzFTE1MxUAZGRk/tRkZGT+1GRkZGRk/tRkZGQCvGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkAAAJAAABLAEsAyAAAwAHAAsADwATABcAGwAfACMAABM1MxUxNTMVMTUzFQc1MxUHNTMVBzUzFQc1MxUxNTMVMTUzFQBkZGRkZMhkyGRkZGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZGRkAAcAAAEsAMgDIAADAAcACwAPABMAFwAbAAATNTMVMTUzFQc1MxUHNTMVBzUzFQc1MxUxNTMVAGRkyGRkZGRkZGRkArxkZGRkZGRkZGRkZGRkZGRkZGQAAAAFAAABLAEsAyAAAwAHAAsADwATAAATNTMdATUzFQc1MxUHNTMdATUzFQBkZGRkZGRkArxkZGRkZGRkZGRkZGRkZAAAAAcAZAEsASwDIAADAAcACwAPABMAFwAbAAATNTMVMTUzFQc1MxUHNTMVBzUzFQc1MxUxNTMVZGRkZGRkZGRkyGRkArxkZGRkZGRkZGRkZGRkZGRkZGQAAAADAAACWAEsAyAAAwAHAAsAABM1MxUHNTMVMzUzFWRkyGRkZAK8ZGRkZGRkZAAAAAADAAABLAEsAZAAAwAHAAsAABM1MxUxNTMVMTUzFQBkZGQBLGRkZGRkZAAAAAIAZAJYASwDIAADAAcAABM1Mx0BNTMVZGRkArxkZGRkZAAAAAgAAAEsASwDIAADAAcACwAPABMAFwAbAB8AABM1MxUxNTMVBzUzFQc1MxUxNTMVBzUzFQc1MxUxNTMVZGRkyGTIZGRkZGRkZAK8ZGRkZGRkZGRkZGRkZGRkZGRkZGQAAAUAZAEsAMgDIAADAAcACwAPABMAABM1MxUHNTMVBzUzFQc1MxUHNTMVZGRkZGRkZGRkZAK8ZGRkZGRkZGRkZGRkZGQACAAAASwBLAMgAAMABwALAA8AEwAXABsAHwAAEzUzFTE1MxUHNTMVBzUzFTE1MxUHNTMVBzUzFTE1MxUAZGRkZGRkZMhkyGRkArxkZGRkZGRkZGRkZGRkZGRkZGRkZAAABQAAAZABLAK8AAMABwALAA8AEwAAEzUzFQU1MxUxNTMVMTUzFQU1MxXIZP7UZGRk/tRkAlhkZGRkZGRkZGRkZGQAAAABAAAAAQAAgZ6qUV8PPPUACwMgAAAAAOXxRmQAAAAA5fFGZAAAAAABMgMgAAAACAACAAAAAAAAAAEAAAMgAAAAyAGQAAAARAEyAAEAAAAAAAAAAAAAAAAAAABEAXYAIgEsAGQBkAAAAZAAAAGQAAABkAAAAZAAAAEsAAABLAAAAZAAZAGQAAABkAAAASwAAAGQAAABLABkAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABLABkASwAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABkAAAAZAAAAGQAAABLAAAAZAAAAGQAGQBkAAAAZAAAAGQAGQBkAAAASwAZAGQAAAAAAAAAAAAFAAyAE4AlADSAP4BPgFQAXIBlAHKAeoB/AISAh4CQAKGArYC9AMuA2QDogPcBAgEUgSMBJ4EtgTYBPwFHgVIBXoFwAYEBjAGcAaqBtoHEAdSB4YHtgfyCB4IZAigCNwJGAlOCY4JxAnwCiwKaAquCuYLJgtaC4YLqAvUC+wMAgwUDEQMZgyWDLgAAQAAAEUANAANAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAlgABAAAAAAABAAwAAAABAAAAAAACAAcADAABAAAAAAADAB4AEwABAAAAAAAEAAwAMQABAAAAAAAFAAsAPQABAAAAAAAGAAwASAADAAEECQABABgAVAADAAEECQACAA4AbAADAAEECQADADwAegADAAEECQAEABgAtgADAAEECQAFABYAzgADAAEECQAGABgA5FRpbnlScGdQaWNvOFJlZ3VsYXJUaW55IFJQRyBTdHVkaW8gQml0bWFwIFVJIEZvbnRUaW55UnBnUGljbzhWZXJzaW9uIDEuMFRpbnlScGdQaWNvOABUAGkAbgB5AFIAcABnAFAAaQBjAG8AOABSAGUAZwB1AGwAYQByAFQAaQBuAHkAIABSAFAARwAgAFMAdAB1AGQAaQBvACAAQgBpAHQAbQBhAHAAIABVAEkAIABGAG8AbgB0AFQAaQBuAHkAUgBwAGcAUABpAGMAbwA4AFYAZQByAHMAaQBvAG4AIAAxAC4AMABUAGkAbgB5AFIAcABnAFAAaQBjAG8AOAAAAAIAAAAAAAAAMgAAAAAAAAAAAAAAAAAAAAAAAAAAAEUARQAAAAQABQAGAAcACAAJAAoACwAMAA0ADgAPABAAEQASABMAFAAVABYAFwAYABkAGgAbABwAHQAeAB8AIAAhACIAIwCtACUAZABHAEgASQBKAEsATABNAE4ATwBQAFEAUgBTAFQAVQBWAFcAWABZAFoAWwBcAF0APgA/AEAAQQBCAEMAXgBfAGAAYQ==",ct="data:image/png;base64,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",$=8,si=Math.round($*1.25),oi=16,li=1,Lt=4,Ve=$+2;function ci(){if(typeof document>"u"||document.getElementById("engine-font-config"))return;const m=document.createElement("style");m.id="engine-font-config",m.textContent=`
         @font-face {
@@ -936,213 +951,220 @@ function getNpcSprite(type) {
     return NPC_SPRITES[base] || NPC_SPRITES['default'];
 }
 
-async function generateSMSRom() {
+async function buildSMSRom() {
+    const api = window.TinyRPGMaker;
+    if (!api) throw new Error('Engine not ready — please wait and try again.');
+
+    const gameData = api.exportGameData();
+    if (!gameData) throw new Error('No game data.');
+    const title = (gameData.title || 'My SMS RPG').slice(0, 32);
+
+    /* ── Palette ── */
+    const DEFAULT_PAL = ['#000000','#1D2B53','#7E2553','#008751',
+    '#AB5236','#5F574F','#C2C3C7','#FFF1E8',
+    '#FF004D','#FFA300','#FFFF27','#00E756',
+    '#29ADFF','#83769C','#FF77A8','#FFCCAA'];
+    const palette = (Array.isArray(gameData.customPalette) && gameData.customPalette.length === 16)
+    ? gameData.customPalette : DEFAULT_PAL;
+    const palBytes = palette.map(hexToSmsByte);
+
+    /* ── NPC types ──
+       Collect the unique NPC types used, capped at N_NPC_SPRITE_TYPES.
+       Build a sprite_type index (0-3) for each NPC.
+    */
+    setStatus('Collecting NPC types…', '#8af');
+    const allNpcs = Array.isArray(gameData.sprites) ? gameData.sprites : [];
+    const placedNpcs = allNpcs.filter(n => n.placed !== false);
+
+    // Map NPC type string → sprite_type index (0..N_NPC_SPRITE_TYPES-1)
+    const typeToIdx = new Map();
+    for (const npc of placedNpcs) {
+        const t = npc.type || 'default';
+        if (!typeToIdx.has(t) && typeToIdx.size < N_NPC_SPRITE_TYPES)
+            typeToIdx.set(t, typeToIdx.size);
+    }
+
+    /* ── BG tiles ── */
+    setStatus('Encoding tiles…', '#8af');
+    const liveTiles = api.getTiles();
+    if (!Array.isArray(liveTiles) || !liveTiles.length) throw new Error('No tiles found.');
+    const idToIdx = new Map();
+    liveTiles.forEach((t,i) => idToIdx.set(String(t.id), i));
+
+    function getTilePx(t) {
+        return (t && t.pixels && t.pixels.length === 8) ? t.pixels
+            : Array.from({length:8}, () => Array(8).fill(palette[0]));
+    }
+
+    /* ── Build main.til ──
+       Layout: BG0 | player | NPC-type-0..3 (all 4 always) | BG1 | BG2 | …
+       We always emit all 4 NPC type slots so the C code's base_tile
+       calculations are always correct regardless of how many types are used.
+    */
+    const tileBuf = [];
+    tileBuf.push(...encodeBGTile(getTilePx(liveTiles[0]), palette)); // BG tile 0, tileNum 1
+    tileBuf.push(...buildSpriteFrames(PLAYER_SP));                    // player, tileNums 2-5
+    for (let t = 0; t < N_NPC_SPRITE_TYPES; t++) {                   // NPC types 0-3
+        // Find the NPC type assigned to this slot (if any)
+        let spriteName = 'default';
+        for (const [k,v] of typeToIdx) { if (v === t) { spriteName = k; break; } }
+        tileBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));  // tileNums 6-9, 10-13, …
+    }
+    for (let i = 1; i < liveTiles.length; i++)
+        tileBuf.push(...encodeBGTile(getTilePx(liveTiles[i]), palette)); // BG tile 1+
+
+    /* ── Tile attributes ──
+       attrBuf[tileNumber-1] = 16-bit attribute word.
+       Indices 0: BG tile 0, indices 1-4: player reserved, indices 5-20: NPC reserved,
+       index 21+i-1 (i>=1): BG tile i.
+    */
+    const maxTileNum = bgIdxToNum(liveTiles.length - 1);
+    const attrBuf = new Array((maxTileNum + 1) * 2).fill(0);
+    liveTiles.forEach((t, i) => {
+        const tn = bgIdxToNum(i);
+        const attr = t.collision ? 0x0001 : 0;
+        attrBuf[(tn-1)*2] = attr & 0xFF; attrBuf[(tn-1)*2+1] = (attr>>8) & 0xFF;
+    });
+
+    /* ── Player start ── */
+    let startRoom = 0, startX = 1, startY = 1;
+    try {
+        const gd = api.exportGameData();
+        if (gd && gd.start) {
+            startRoom = (gd.start.roomIndex || 0) & 0xFF;
+            startX    = (gd.start.x || 1) & 0xFF;
+            startY    = (gd.start.y || 1) & 0xFF;
+        }
+    } catch(e) {}
+
+    /* ── Start marker tile (TILE_ATTR_PLAYER_START) ──
+       Same pixels as the ground tile at start position.
+       Placed in the map at the player's starting cell.
+    */
+    const startTileNum = maxTileNum + 1;
+    // BUG WORKAROUND: api.getTileMap() doesn't forward roomIndex; read maps directly.
+    const tilesetMaps = (gameData.tileset && Array.isArray(gameData.tileset.maps))
+        ? gameData.tileset.maps : [];
+    const startTm = tilesetMaps[startRoom] || null;
+    const startGround = startTm && startTm.ground;
+    const startTid = (startGround && startGround[startY] && startGround[startY][startX] != null)
+        ? startGround[startY][startX] : null;
+    const startBgIdx = (startTid != null && idToIdx.has(String(startTid)))
+        ? idToIdx.get(String(startTid)) : 0;
+    tileBuf.push(...encodeBGTile(getTilePx(liveTiles[startBgIdx]), palette));
+    // Set TILE_ATTR_PLAYER_START (0x0002)
+    while (attrBuf.length < (startTileNum) * 2) attrBuf.push(0);
+    attrBuf[(startTileNum-1)*2]   = 0x02;
+    attrBuf[(startTileNum-1)*2+1] = 0x00;
+
+    /* ── Maps ── */
+    setStatus('Encoding maps…', '#8af');
+    const mapFiles = [];
+    for (let r = 0; r < 9; r++) {
+        const tm = tilesetMaps[r] || null;
+        const ground  = (tm && tm.ground)  || [];
+        const overlay = (tm && tm.overlay) || [];
+        const bytes = [];
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                if (r === startRoom && col === startX && row === startY) {
+                    bytes.push(startTileNum); continue;
+                }
+                const ov = overlay[row] && overlay[row][col];
+                const gr = ground[row]  && ground[row][col];
+                const tid = (ov != null) ? ov : (gr != null) ? gr : null;
+                const idx = (tid != null && idToIdx.has(String(tid)))
+                    ? idToIdx.get(String(tid)) : 0;
+                bytes.push(bgIdxToNum(idx));
+            }
+        }
+        mapFiles.push({ name:`level${String(r+1).padStart(3,'0')}.map`,
+            content:[...u16(r+1),...u16(8),...u16(8),...strBytes(`Room ${r+1}`,32),...bytes] });
+    }
+
+    /* ── entities.dat ──
+       byte 0: npc_count
+       per NPC: room(1) x(1) y(1) sprite_type(1)
+    */
+    setStatus('Building entity data…', '#8af');
+    // entities.dat: byte 0 = npc_count, then per NPC: room(1)+x(1)+y(1)+sprite_type(1)+dialog[36]
+    const NPC_DIALOG_LEN = 36;
+    const entBuf = [Math.min(placedNpcs.length, 31)];
+    for (let i = 0; i < Math.min(placedNpcs.length, 31); i++) {
+        const npc = placedNpcs[i];
+        const t   = npc.type || 'default';
+        const si  = typeToIdx.has(t) ? typeToIdx.get(t) : 0;
+        // Dialog text: use npc.text, truncated to 35 chars
+        const rawText = (npc.text || '').slice(0, NPC_DIALOG_LEN - 1);
+        const dialogBytes = new Array(NPC_DIALOG_LEN).fill(0);
+        for (let c = 0; c < rawText.length; c++)
+            dialogBytes[c] = rawText.charCodeAt(c) & 0xFF;
+        entBuf.push(
+            (npc.roomIndex || 0) & 0xFF,
+            (npc.x || 0) & 0xFF,
+            (npc.y || 0) & 0xFF,
+            si & 0xFF,
+            ...dialogBytes
+        );
+    }
+
+    /* ── project.inf / merging.dat ── */
+    const worldCols = (gameData.world && gameData.world.cols) ? Math.max(1, gameData.world.cols) : 3;
+    const worldRows = (gameData.world && gameData.world.rows) ? Math.max(1, gameData.world.rows) : 3;
+    const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title),
+        worldCols & 0xFF, worldRows & 0xFF];
+    const totalTN = startTileNum;
+    const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
+
+    /* ── Assemble resource filesystem ── */
+    setStatus('Building resource filesystem…', '#8af');
+    const files = [
+        { name:'main.pal',    content:Array.from(palBytes) },
+        { name:'main.til',    content:tileBuf },
+        { name:'main.atr',    content:attrBuf },
+        { name:'entities.dat',content:entBuf },
+        { name:'project.inf', content:projInfo },
+        { name:'merging.dat', content:combos },
+        ...mapFiles
+    ];
+    const resourceData = buildResourceFS(files);
+
+    /* ── Assemble ROM ── */
+    const baseRom = b64ToBytes(BASE_ROM_B64);
+    const rom = new Uint8Array(baseRom.length + resourceData.length);
+    rom.set(baseRom);
+    resourceData.forEach((b,i) => { rom[baseRom.length+i] = b; });
+
+    const kb = Math.ceil(rom.length / 1024);
+    const safeTitle = title.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').toLowerCase() || 'my-tiny-rpg';
+    const filename = `${safeTitle}.sms`;
+
+    const nTypes = typeToIdx.size;
+    const summary = `${kb} KB · ${liveTiles.length} tiles · ${placedNpcs.length} NPCs` +
+        ` (${nTypes} type${nTypes!==1?'s':''}) · start: room ${startRoom+1} (${startX},${startY})`;
+
+    return { rom, filename, title, summary };
+}
+
+function downloadRomBytes(rom, filename) {
+    let bin = '';
+    for (let i = 0; i < rom.length; i++) bin += String.fromCharCode(rom[i]);
+    const dataUrl = 'data:application/octet-stream;base64,' + btoa(bin);
+    const a = document.createElement('a');
+    a.href = dataUrl; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+}
+
+async function handleExportClick() {
     const btn = document.getElementById('btn-generate-sms-rom');
+    if (!btn) return;
     btn.disabled = true;
     setStatus('Building ROM…', '#8af');
     try {
-        const api = window.TinyRPGMaker;
-        if (!api) throw new Error('Engine not ready — please wait and try again.');
-
-        const gameData = api.exportGameData();
-        if (!gameData) throw new Error('No game data.');
-        const title = (gameData.title || 'My SMS RPG').slice(0, 32);
-
-        /* ── Palette ── */
-        const DEFAULT_PAL = ['#000000','#1D2B53','#7E2553','#008751',
-            '#AB5236','#5F574F','#C2C3C7','#FFF1E8',
-            '#FF004D','#FFA300','#FFFF27','#00E756',
-            '#29ADFF','#83769C','#FF77A8','#FFCCAA'];
-        const palette = (Array.isArray(gameData.customPalette) && gameData.customPalette.length === 16)
-            ? gameData.customPalette : DEFAULT_PAL;
-        const palBytes = palette.map(hexToSmsByte);
-
-        /* ── NPC types ──
-           Collect the unique NPC types used, capped at N_NPC_SPRITE_TYPES.
-           Build a sprite_type index (0-3) for each NPC.
-        */
-        setStatus('Collecting NPC types…', '#8af');
-        const allNpcs = Array.isArray(gameData.sprites) ? gameData.sprites : [];
-        const placedNpcs = allNpcs.filter(n => n.placed !== false);
-
-        // Map NPC type string → sprite_type index (0..N_NPC_SPRITE_TYPES-1)
-        const typeToIdx = new Map();
-        for (const npc of placedNpcs) {
-            const t = npc.type || 'default';
-            if (!typeToIdx.has(t) && typeToIdx.size < N_NPC_SPRITE_TYPES)
-                typeToIdx.set(t, typeToIdx.size);
-        }
-
-        /* ── BG tiles ── */
-        setStatus('Encoding tiles…', '#8af');
-        const liveTiles = api.getTiles();
-        if (!Array.isArray(liveTiles) || !liveTiles.length) throw new Error('No tiles found.');
-        const idToIdx = new Map();
-        liveTiles.forEach((t,i) => idToIdx.set(String(t.id), i));
-
-        function getTilePx(t) {
-            return (t && t.pixels && t.pixels.length === 8) ? t.pixels
-                : Array.from({length:8}, () => Array(8).fill(palette[0]));
-        }
-
-        /* ── Build main.til ──
-           Layout: BG0 | player | NPC-type-0..3 (all 4 always) | BG1 | BG2 | …
-           We always emit all 4 NPC type slots so the C code's base_tile
-           calculations are always correct regardless of how many types are used.
-        */
-        const tileBuf = [];
-        tileBuf.push(...encodeBGTile(getTilePx(liveTiles[0]), palette)); // BG tile 0, tileNum 1
-        tileBuf.push(...buildSpriteFrames(PLAYER_SP));                    // player, tileNums 2-5
-        for (let t = 0; t < N_NPC_SPRITE_TYPES; t++) {                   // NPC types 0-3
-            // Find the NPC type assigned to this slot (if any)
-            let spriteName = 'default';
-            for (const [k,v] of typeToIdx) { if (v === t) { spriteName = k; break; } }
-            tileBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));  // tileNums 6-9, 10-13, …
-        }
-        for (let i = 1; i < liveTiles.length; i++)
-            tileBuf.push(...encodeBGTile(getTilePx(liveTiles[i]), palette)); // BG tile 1+
-
-        /* ── Tile attributes ──
-           attrBuf[tileNumber-1] = 16-bit attribute word.
-           Indices 0: BG tile 0, indices 1-4: player reserved, indices 5-20: NPC reserved,
-           index 21+i-1 (i>=1): BG tile i.
-        */
-        const maxTileNum = bgIdxToNum(liveTiles.length - 1);
-        const attrBuf = new Array((maxTileNum + 1) * 2).fill(0);
-        liveTiles.forEach((t, i) => {
-            const tn = bgIdxToNum(i);
-            const attr = t.collision ? 0x0001 : 0;
-            attrBuf[(tn-1)*2] = attr & 0xFF; attrBuf[(tn-1)*2+1] = (attr>>8) & 0xFF;
-        });
-
-        /* ── Player start ── */
-        let startRoom = 0, startX = 1, startY = 1;
-        try {
-            const gd = api.exportGameData();
-            if (gd && gd.start) {
-                startRoom = (gd.start.roomIndex || 0) & 0xFF;
-                startX    = (gd.start.x || 1) & 0xFF;
-                startY    = (gd.start.y || 1) & 0xFF;
-            }
-        } catch(e) {}
-
-        /* ── Start marker tile (TILE_ATTR_PLAYER_START) ──
-           Same pixels as the ground tile at start position.
-           Placed in the map at the player's starting cell.
-        */
-        const startTileNum = maxTileNum + 1;
-        // BUG WORKAROUND: api.getTileMap() doesn't forward roomIndex; read maps directly.
-        const tilesetMaps = (gameData.tileset && Array.isArray(gameData.tileset.maps))
-            ? gameData.tileset.maps : [];
-        const startTm = tilesetMaps[startRoom] || null;
-        const startGround = startTm && startTm.ground;
-        const startTid = (startGround && startGround[startY] && startGround[startY][startX] != null)
-            ? startGround[startY][startX] : null;
-        const startBgIdx = (startTid != null && idToIdx.has(String(startTid)))
-            ? idToIdx.get(String(startTid)) : 0;
-        tileBuf.push(...encodeBGTile(getTilePx(liveTiles[startBgIdx]), palette));
-        // Set TILE_ATTR_PLAYER_START (0x0002)
-        while (attrBuf.length < (startTileNum) * 2) attrBuf.push(0);
-        attrBuf[(startTileNum-1)*2]   = 0x02;
-        attrBuf[(startTileNum-1)*2+1] = 0x00;
-
-        /* ── Maps ── */
-        setStatus('Encoding maps…', '#8af');
-        const mapFiles = [];
-        for (let r = 0; r < 9; r++) {
-            const tm = tilesetMaps[r] || null;
-            const ground  = (tm && tm.ground)  || [];
-            const overlay = (tm && tm.overlay) || [];
-            const bytes = [];
-            for (let row = 0; row < 8; row++) {
-                for (let col = 0; col < 8; col++) {
-                    if (r === startRoom && col === startX && row === startY) {
-                        bytes.push(startTileNum); continue;
-                    }
-                    const ov = overlay[row] && overlay[row][col];
-                    const gr = ground[row]  && ground[row][col];
-                    const tid = (ov != null) ? ov : (gr != null) ? gr : null;
-                    const idx = (tid != null && idToIdx.has(String(tid)))
-                        ? idToIdx.get(String(tid)) : 0;
-                    bytes.push(bgIdxToNum(idx));
-                }
-            }
-            mapFiles.push({ name:`level${String(r+1).padStart(3,'0')}.map`,
-                content:[...u16(r+1),...u16(8),...u16(8),...strBytes(`Room ${r+1}`,32),...bytes] });
-        }
-
-        /* ── entities.dat ──
-           byte 0: npc_count
-           per NPC: room(1) x(1) y(1) sprite_type(1)
-        */
-        setStatus('Building entity data…', '#8af');
-        // entities.dat: byte 0 = npc_count, then per NPC: room(1)+x(1)+y(1)+sprite_type(1)+dialog[36]
-        const NPC_DIALOG_LEN = 36;
-        const entBuf = [Math.min(placedNpcs.length, 31)];
-        for (let i = 0; i < Math.min(placedNpcs.length, 31); i++) {
-            const npc = placedNpcs[i];
-            const t   = npc.type || 'default';
-            const si  = typeToIdx.has(t) ? typeToIdx.get(t) : 0;
-            // Dialog text: use npc.text, truncated to 35 chars
-            const rawText = (npc.text || '').slice(0, NPC_DIALOG_LEN - 1);
-            const dialogBytes = new Array(NPC_DIALOG_LEN).fill(0);
-            for (let c = 0; c < rawText.length; c++)
-                dialogBytes[c] = rawText.charCodeAt(c) & 0xFF;
-            entBuf.push(
-                (npc.roomIndex || 0) & 0xFF,
-                (npc.x || 0) & 0xFF,
-                (npc.y || 0) & 0xFF,
-                si & 0xFF,
-                ...dialogBytes
-            );
-        }
-
-        /* ── project.inf / merging.dat ── */
-        const worldCols = (gameData.world && gameData.world.cols) ? Math.max(1, gameData.world.cols) : 3;
-        const worldRows = (gameData.world && gameData.world.rows) ? Math.max(1, gameData.world.rows) : 3;
-        const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title),
-            worldCols & 0xFF, worldRows & 0xFF];
-        const totalTN = startTileNum;
-        const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
-
-        /* ── Assemble resource filesystem ── */
-        setStatus('Building resource filesystem…', '#8af');
-        const files = [
-            { name:'main.pal',    content:Array.from(palBytes) },
-            { name:'main.til',    content:tileBuf },
-            { name:'main.atr',    content:attrBuf },
-            { name:'entities.dat',content:entBuf },
-            { name:'project.inf', content:projInfo },
-            { name:'merging.dat', content:combos },
-            ...mapFiles
-        ];
-        const resourceData = buildResourceFS(files);
-
-        /* ── Assemble ROM ── */
-        const baseRom = b64ToBytes(BASE_ROM_B64);
-        const rom = new Uint8Array(baseRom.length + resourceData.length);
-        rom.set(baseRom);
-        resourceData.forEach((b,i) => { rom[baseRom.length+i] = b; });
-
-        const kb = Math.ceil(rom.length / 1024);
-        const safeTitle = title.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-            .replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').toLowerCase() || 'my-tiny-rpg';
-        const filename = `${safeTitle}.sms`;
-
-        let bin = '';
-        for (let i = 0; i < rom.length; i++) bin += String.fromCharCode(rom[i]);
-        const dataUrl = 'data:application/octet-stream;base64,' + btoa(bin);
-        const a = document.createElement('a');
-        a.href = dataUrl; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove();
-
-        const nTypes = typeToIdx.size;
-        setStatus(
-            `✓ ${kb} KB · ${liveTiles.length} tiles · ${placedNpcs.length} NPCs` +
-            ` (${nTypes} type${nTypes!==1?'s':''}) · start: room ${startRoom+1} (${startX},${startY})`,
-            '#4f8'
-        );
-
+        const { rom, filename, summary } = await buildSMSRom();
+        downloadRomBytes(rom, filename);
+        setStatus('✓ ' + summary, '#4f8');
     } catch(err) {
         console.error('[SMS ROM Export]', err);
         setStatus('Error: ' + err.message, '#f88');
@@ -1151,10 +1173,118 @@ async function generateSMSRom() {
     }
 }
 
+/* ============================================================
+   EmulatorJS integration
+   Loads https://cdn.emulatorjs.org/stable/data/loader.js with
+   EJS_core = "segaMS" and the freshly-built ROM as a Blob URL.
+   ============================================================ */
+
+let _emuLoaderInjected = false;
+let _emuCurrentBlobUrl = null;
+
+function teardownEmulator() {
+    try {
+        if (window.EJS_emulator && typeof window.EJS_emulator.callEvent === 'function') {
+            window.EJS_emulator.callEvent('exit');
+        }
+    } catch (e) { /* ignore */ }
+    const target = document.getElementById('sms-emulator-target');
+    if (target) target.innerHTML = '';
+    if (_emuCurrentBlobUrl) {
+        try { URL.revokeObjectURL(_emuCurrentBlobUrl); } catch (e) {}
+        _emuCurrentBlobUrl = null;
+    }
+    // Clear global EJS state so next launch starts fresh
+    delete window.EJS_emulator;
+    delete window.EJS_player;
+    delete window.EJS_core;
+    delete window.EJS_gameUrl;
+    delete window.EJS_pathtodata;
+    delete window.EJS_startOnLoaded;
+    delete window.EJS_gameName;
+    _emuLoaderInjected = false;
+}
+
+function openEmulatorModal() {
+    const modal = document.getElementById('sms-emulator-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeEmulatorModal() {
+    const modal = document.getElementById('sms-emulator-modal');
+    if (modal) modal.style.display = 'none';
+    teardownEmulator();
+}
+
+function launchEmulatorWithRom(rom, gameName) {
+    // Always tear down any existing emulator first (so Reload works)
+    teardownEmulator();
+
+    const blob = new Blob([rom], { type: 'application/octet-stream' });
+    const blobUrl = URL.createObjectURL(blob);
+    _emuCurrentBlobUrl = blobUrl;
+
+    window.EJS_player       = '#sms-emulator-target';
+    window.EJS_core         = 'segaMS';
+    window.EJS_gameUrl      = blobUrl;
+    window.EJS_pathtodata   = 'https://cdn.emulatorjs.org/stable/data/';
+    window.EJS_startOnLoaded= true;
+    window.EJS_gameName     = gameName || 'SMS RPG Game';
+
+    openEmulatorModal();
+
+    const loaderScript = document.createElement('script');
+    loaderScript.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+    loaderScript.async = true;
+    loaderScript.onerror = () => {
+        setStatus('Failed to load EmulatorJS — check your connection.', '#f88');
+        closeEmulatorModal();
+    };
+    document.body.appendChild(loaderScript);
+    _emuLoaderInjected = true;
+}
+
+async function handlePlayClick() {
+    const btn = document.getElementById('btn-play-sms-rom');
+    if (!btn) return;
+    btn.disabled = true;
+    setStatus('Building ROM…', '#8af');
+    try {
+        const { rom, title, summary } = await buildSMSRom();
+        setStatus('▶ Launching emulator… ' + summary, '#4ac04a');
+        launchEmulatorWithRom(rom, title);
+    } catch(err) {
+        console.error('[SMS Play]', err);
+        setStatus('Error: ' + err.message, '#f88');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 function wireSmsButton() {
-    const btn = document.getElementById('btn-generate-sms-rom');
-    if (btn) btn.addEventListener('click', generateSMSRom);
-    else setTimeout(wireSmsButton, 500);
+    const exportBtn = document.getElementById('btn-generate-sms-rom');
+    const playBtn   = document.getElementById('btn-play-sms-rom');
+    const closeBtn  = document.getElementById('sms-emulator-close');
+    const reloadBtn = document.getElementById('sms-emulator-reload');
+    const modal     = document.getElementById('sms-emulator-modal');
+
+    if (!exportBtn || !playBtn || !closeBtn || !reloadBtn || !modal) {
+        setTimeout(wireSmsButton, 500);
+        return;
+    }
+
+    exportBtn.addEventListener('click', handleExportClick);
+    playBtn.addEventListener('click',   handlePlayClick);
+    closeBtn.addEventListener('click',  closeEmulatorModal);
+    reloadBtn.addEventListener('click', handlePlayClick);
+
+    // Close on Escape or backdrop click
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.style.display === 'flex') closeEmulatorModal();
+    });
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeEmulatorModal();
+    });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireSmsButton);
 else wireSmsButton();
