@@ -295,7 +295,10 @@ void wait_button_release() {
 #define MAX_NPC_SPRITE_TYPES (4)
 #define MAX_NPCS (16)
 #define NPC_DIALOG_LEN (36)
+#define NPC_ENTRY_LEN (4 + 2 * NPC_DIALOG_LEN + 3) /* room,x,y,type + 2 dialogs + 3 var ids */
 #define NPC_BASE_TILE(t) ((unsigned char)(8 + 16 + (unsigned char)(t) * 16))
+#define VAR_NONE (0xFF)
+#define NUM_GAME_VARS (32)
 
 typedef struct {
 	unsigned char room;
@@ -303,14 +306,32 @@ typedef struct {
 	unsigned char y;
 	unsigned char sprite_type;
 	char          dialog[NPC_DIALOG_LEN];
+	char          dialog2[NPC_DIALOG_LEN];
+	unsigned char condition_var;
+	unsigned char reward_var;
+	unsigned char cond_reward_var;
 } npc_t;
 
 static npc_t         npc_data[MAX_NPCS];
 static actor         npc_actors[MAX_NPCS];
 static unsigned char npc_count;
 static char          dialog_active;
+static unsigned char pending_reward_var;
+static unsigned char game_vars[NUM_GAME_VARS / 8]; /* 32 boolean flags */
 static unsigned char world_cols;
 static unsigned char world_rows;
+
+/* ── Game variable system ──
+   Global boolean flags settable by NPC dialogs.
+   Used to gate alternative dialogs and rewards. */
+static unsigned char var_get(unsigned char i) {
+	if (i >= NUM_GAME_VARS) return 0;
+	return (unsigned char)((game_vars[i >> 3] >> (i & 7)) & 1);
+}
+static void var_set(unsigned char i) {
+	if (i >= NUM_GAME_VARS) return;
+	game_vars[i >> 3] |= (unsigned char)(1 << (i & 7));
+}
 static void load_entities(void) {
 	unsigned char i;
 	unsigned char *p;
@@ -318,6 +339,8 @@ static void load_entities(void) {
 
 	npc_count = 0;
 	dialog_active = 0;
+	pending_reward_var = VAR_NONE;
+	for (i = 0; i < (NUM_GAME_VARS / 8); i++) game_vars[i] = 0;
 	world_cols = 3;
 	world_rows = 3;
 
@@ -344,7 +367,7 @@ static void load_entities(void) {
 	npc_count = p[0];
 	if (npc_count > MAX_NPCS) npc_count = MAX_NPCS;
 	for (i = 0; i < npc_count; i++) {
-		unsigned char *base = p + 1 + (unsigned int)i * (4 + NPC_DIALOG_LEN);
+		unsigned char *base = p + 1 + (unsigned int)i * NPC_ENTRY_LEN;
 		npc_data[i].room        = base[0];
 		npc_data[i].x           = base[1];
 		npc_data[i].y           = base[2];
@@ -354,8 +377,13 @@ static void load_entities(void) {
 		if (npc_data[i].y >= 8)   npc_data[i].y    = 0;
 		if (npc_data[i].sprite_type >= MAX_NPC_SPRITE_TYPES)
 			npc_data[i].sprite_type = 0;
-		memcpy(npc_data[i].dialog, (char *)(base + 4), NPC_DIALOG_LEN);
-		npc_data[i].dialog[NPC_DIALOG_LEN - 1] = 0;
+		memcpy(npc_data[i].dialog,  (char *)(base + 4),                       NPC_DIALOG_LEN);
+		memcpy(npc_data[i].dialog2, (char *)(base + 4 + NPC_DIALOG_LEN),      NPC_DIALOG_LEN);
+		npc_data[i].dialog [NPC_DIALOG_LEN - 1] = 0;
+		npc_data[i].dialog2[NPC_DIALOG_LEN - 1] = 0;
+		npc_data[i].condition_var   = base[4 + 2 * NPC_DIALOG_LEN + 0];
+		npc_data[i].reward_var      = base[4 + 2 * NPC_DIALOG_LEN + 1];
+		npc_data[i].cond_reward_var = base[4 + 2 * NPC_DIALOG_LEN + 2];
 		npc_actors[i].active = 0;
 	}
 }
@@ -368,9 +396,29 @@ static void show_npc_dialog(char *text) {
 	dialog_active = 1;
 }
 
+/* Resolve which dialog text to show for NPC i (default vs conditional),
+   set the pending reward variable, and display the chosen text. */
+static void show_npc_dialog_for(unsigned char i) {
+	unsigned char cv = npc_data[i].condition_var;
+	char *text;
+	if (cv != VAR_NONE && var_get(cv) && npc_data[i].dialog2[0]) {
+		text = npc_data[i].dialog2;
+		pending_reward_var = npc_data[i].cond_reward_var;
+	} else {
+		text = npc_data[i].dialog;
+		pending_reward_var = npc_data[i].reward_var;
+	}
+	if (text[0]) show_npc_dialog(text);
+}
+
 static void close_npc_dialog(void) {
 	unsigned char i;
 	for (i = 0; i < 32; i++) SMS_setTileatXY(i, 21, 0);
+	/* Award the variable that this dialog grants, if any */
+	if (pending_reward_var != VAR_NONE) {
+		var_set(pending_reward_var);
+		pending_reward_var = VAR_NONE;
+	}
 	dialog_active = 0;
 }
 
@@ -463,8 +511,7 @@ char gameplay_loop() {
 						_ty = (unsigned char)(_py + _dy);
 						_ni = find_npc_at(_room, _tx, _ty);
 						if (_ni) {
-							if (npc_data[_ni-1].dialog[0])
-								show_npc_dialog(npc_data[_ni-1].dialog);
+							show_npc_dialog_for((unsigned char)(_ni - 1));
 						} else {
 							/* Check for world edge crossing (TRS MovementManager logic) */
 							/* Use constant room size (always 8x8 in TRS) — avoids bank-mapping issues */
