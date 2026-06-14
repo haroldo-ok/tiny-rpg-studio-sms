@@ -3,26 +3,32 @@
    SMS RPG Studio — ROM Generator
 
    VRAM layout (SMS_loadTiles at slot 4, first-half for sprites):
-     Slot  4- 7 : BG tile 0        (tileNumber 1)
-     Slot  8-23 : Player sprite     (tileNumbers 2-5, reserved)
-     Slot 24-39 : NPC sprite type 0 (tileNumbers 6-9, reserved)
-     Slot 40-55 : NPC sprite type 1 (tileNumbers 10-13, reserved)
-     Slot 56-71 : NPC sprite type 2 (tileNumbers 14-17, reserved)
-     Slot 72-87 : NPC sprite type 3 (tileNumbers 18-21, reserved)
-     Slot 88+   : BG tile 1,2,…    (tileNumber = bgIdx + 21)
+     Slot   4-  7 : BG tile 0          (tileNumber 1)
+     Slot   8- 23 : Player sprite       (tileNumbers 2-5, reserved)
+     Slot  24-151 : NPC sprite types 0-7 (16 sub-tiles each)
+                                        (tileNumbers 6-37, reserved)
+     Slot 152+    : BG tile 1,2,…       (tileNumber = bgIdx + 37)
 
-   entities.dat:
-     byte 0: npc_count
-     per NPC (4 bytes): room, x, y, sprite_type
+   entities.dat (79 bytes per NPC):
+     bytes 0-3:   room, x, y, sprite_type
+     bytes 4-39:  dialog[36]     — default
+     bytes 40-75: dialog2[36]    — conditional
+     byte 76:     condition_var  (0..31 or 0xFF)
+     byte 77:     reward_var
+     byte 78:     cond_reward_var
 
-   bgIdxToNum(i): i==0 → 1; i>=1 → i+21
+   bgIdxToNum(i): i==0 → 1; i>=1 → i + 37
    ============================================================ */
 (function() {
 'use strict';
 
 const BASE_ROM_B64 = "BASE_ROM_PLACEHOLDER";
 
-const N_NPC_SPRITE_TYPES = 4; // must match MAX_NPC_SPRITE_TYPES in C
+const N_NPC_SPRITE_TYPES = 8; // must match MAX_NPC_SPRITE_TYPES in C
+/* First tileNumber available for BG tiles, after the reserved sprite region.
+   Layout: BG[0]=tile 1; player=tiles 2-5; NPC[0..N-1]=tiles 6..(6+4N-1).
+   So the first BG tile (BG[1]) is at tile (6 + 4*N). */
+const FIRST_BG_TILE = 6 + 4 * N_NPC_SPRITE_TYPES; // 38 for N=8
 
 function b64ToBytes(b64) {
     const bin = atob(b64);
@@ -116,7 +122,7 @@ function buildSpriteFrames(sp8) {
 
 // BG tile index → 1-based tileNumber
 // Slots 4-7=BG0(tileNum1), 8-23=player(2-5), 24-87=4 NPC types(6-21), 88+=BG1+(22+)
-function bgIdxToNum(i) { return i === 0 ? 1 : i + 21; }
+function bgIdxToNum(i) { return i === 0 ? 1 : i + (FIRST_BG_TILE - 1); }
 
 // Resource filesystem builder (mirrors SMS-Puzzle-Maker game-resource.js exactly)
 function buildResourceFS(files) {
@@ -188,18 +194,34 @@ async function buildSMSRom() {
 
     /* ── NPC types ──
        Collect the unique NPC types used, capped at N_NPC_SPRITE_TYPES.
-       Build a sprite_type index (0-3) for each NPC.
+       Variants like 'knight-elf' / 'knight-dwarf' share the human slot
+       since they fall back to the same pixels in NPC_SPRITES.
     */
     setStatus('Collecting NPC types…', '#8af');
     const allNpcs = Array.isArray(gameData.sprites) ? gameData.sprites : [];
     const placedNpcs = allNpcs.filter(n => n.placed !== false);
 
-    // Map NPC type string → sprite_type index (0..N_NPC_SPRITE_TYPES-1)
+    // Normalize: strip -elf/-dwarf suffix when the base type exists in NPC_SPRITES.
+    // This lets a knight + knight-elf occupy a single VRAM slot.
+    const normalizeNpcType = (t) => {
+        const s = String(t || 'default');
+        if (NPC_SPRITES[s]) return s;                          // exact match wins
+        const base = s.replace(/-(elf|dwarf)$/, '');
+        return NPC_SPRITES[base] ? base : 'default';
+    };
+
+    // Map normalized NPC type string → sprite_type index (0..N_NPC_SPRITE_TYPES-1)
     const typeToIdx = new Map();
     for (const npc of placedNpcs) {
-        const t = npc.type || 'default';
+        const t = normalizeNpcType(npc.type);
         if (!typeToIdx.has(t) && typeToIdx.size < N_NPC_SPRITE_TYPES)
             typeToIdx.set(t, typeToIdx.size);
+    }
+    // Report overflow so the user knows if the game has more variety than fits
+    const uniqueTypes = new Set(placedNpcs.map(n => normalizeNpcType(n.type)));
+    if (uniqueTypes.size > N_NPC_SPRITE_TYPES) {
+        console.warn('[SMS] ' + uniqueTypes.size + ' unique NPC visuals; only first ' +
+            N_NPC_SPRITE_TYPES + ' get their own sprite. Extras fall back to type 0.');
     }
 
     /* ── BG tiles ── */
@@ -215,26 +237,26 @@ async function buildSMSRom() {
     }
 
     /* ── Build main.til ──
-       Layout: BG0 | player | NPC-type-0..3 (all 4 always) | BG1 | BG2 | …
-       We always emit all 4 NPC type slots so the C code's base_tile
-       calculations are always correct regardless of how many types are used.
+       Layout: BG[0] | player | NPC types 0..7 (always all 8 emitted) | BG[1..N]
+       Emitting all 8 NPC slots unconditionally keeps the C code's base_tile
+       math correct regardless of how many types are actually placed.
     */
     const tileBuf = [];
-    tileBuf.push(...encodeBGTile(getTilePx(liveTiles[0]), palette)); // BG tile 0, tileNum 1
-    tileBuf.push(...buildSpriteFrames(PLAYER_SP));                    // player, tileNums 2-5
-    for (let t = 0; t < N_NPC_SPRITE_TYPES; t++) {                   // NPC types 0-3
+    tileBuf.push(...encodeBGTile(getTilePx(liveTiles[0]), palette));  // BG[0], tileNum 1
+    tileBuf.push(...buildSpriteFrames(PLAYER_SP));                     // player, tileNums 2-5
+    for (let t = 0; t < N_NPC_SPRITE_TYPES; t++) {                    // NPC types 0..N-1
         // Find the NPC type assigned to this slot (if any)
         let spriteName = 'default';
         for (const [k,v] of typeToIdx) { if (v === t) { spriteName = k; break; } }
-        tileBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));  // tileNums 6-9, 10-13, …
+        tileBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));
     }
     for (let i = 1; i < liveTiles.length; i++)
-        tileBuf.push(...encodeBGTile(getTilePx(liveTiles[i]), palette)); // BG tile 1+
+        tileBuf.push(...encodeBGTile(getTilePx(liveTiles[i]), palette)); // BG[1..N]
 
     /* ── Tile attributes ──
        attrBuf[tileNumber-1] = 16-bit attribute word.
-       Indices 0: BG tile 0, indices 1-4: player reserved, indices 5-20: NPC reserved,
-       index 21+i-1 (i>=1): BG tile i.
+       Index 0: BG[0]; indices 1-4: player (reserved); indices 5..(FIRST_BG_TILE-2): NPC types (reserved);
+       index (FIRST_BG_TILE-1)+i-1 (i>=1): BG[i].
     */
     const maxTileNum = bgIdxToNum(liveTiles.length - 1);
     const attrBuf = new Array((maxTileNum + 1) * 2).fill(0);
@@ -341,7 +363,7 @@ async function buildSMSRom() {
     const entBuf = [nNpcs];
     for (let i = 0; i < nNpcs; i++) {
         const npc = placedNpcs[i];
-        const t   = npc.type || 'default';
+        const t   = normalizeNpcType(npc.type);
         const si  = typeToIdx.has(t) ? typeToIdx.get(t) : 0;
         const dialogBytes  = encodeDialog(npc.text);
         const dialog2Bytes = encodeDialog(npc.conditionText);

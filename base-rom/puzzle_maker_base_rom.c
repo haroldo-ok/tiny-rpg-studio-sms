@@ -292,7 +292,7 @@ void wait_button_release() {
 	} while ((joy & (PORT_A_KEY_1 | PORT_A_KEY_2 | PORT_B_KEY_1 | PORT_B_KEY_2)));
 }
 
-#define MAX_NPC_SPRITE_TYPES (4)
+#define MAX_NPC_SPRITE_TYPES (8)
 #define MAX_NPCS (16)
 #define NPC_DIALOG_LEN (36)
 #define NPC_ENTRY_LEN (4 + 2 * NPC_DIALOG_LEN + 3) /* room,x,y,type + 2 dialogs + 3 var ids */
