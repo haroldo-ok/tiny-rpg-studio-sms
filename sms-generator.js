@@ -301,29 +301,66 @@ async function buildSMSRom() {
     }
 
     /* ── entities.dat ──
-       byte 0: npc_count
-       per NPC: room(1) x(1) y(1) sprite_type(1)
+       byte 0:        npc_count (max 16)
+       per NPC (79 bytes):
+         bytes 0..3:   room, x, y, sprite_type
+         bytes 4..39:  dialog[36]            — default text (NUL-terminated)
+         bytes 40..75: dialog2[36]           — conditional alternative text
+         byte 76:      condition_var  (0..31 or 0xFF=none)
+         byte 77:      reward_var     (set when default dialog closes)
+         byte 78:      cond_reward_var (set when conditional dialog closes)
+
+       Variable string IDs from TRS are mapped to a flat 0..31 index space.
+       'skill:bard' and unknown IDs collapse to 0xFF (none).
     */
     setStatus('Building entity data…', '#8af');
-    // entities.dat: byte 0 = npc_count, then per NPC: room(1)+x(1)+y(1)+sprite_type(1)+dialog[36]
     const NPC_DIALOG_LEN = 36;
-    const entBuf = [Math.min(placedNpcs.length, 31)];
-    for (let i = 0; i < Math.min(placedNpcs.length, 31); i++) {
+    const MAX_VARS = 32;
+    const VAR_NONE = 0xFF;
+    const varToIdx = new Map();
+    const getVarIdx = (varId) => {
+        if (!varId) return VAR_NONE;
+        const s = String(varId);
+        if (s === 'skill:bard') return VAR_NONE; // no skill system on SMS port
+        if (varToIdx.has(s)) return varToIdx.get(s);
+        if (varToIdx.size >= MAX_VARS) {
+            console.warn('[SMS] Variable budget (32) exhausted; ignoring', s);
+            return VAR_NONE;
+        }
+        const idx = varToIdx.size;
+        varToIdx.set(s, idx);
+        return idx;
+    };
+    const encodeDialog = (raw) => {
+        const text = (raw || '').slice(0, NPC_DIALOG_LEN - 1);
+        const bytes = new Array(NPC_DIALOG_LEN).fill(0);
+        for (let c = 0; c < text.length; c++) bytes[c] = text.charCodeAt(c) & 0xFF;
+        return bytes;
+    };
+    const nNpcs = Math.min(placedNpcs.length, 16);
+    const entBuf = [nNpcs];
+    for (let i = 0; i < nNpcs; i++) {
         const npc = placedNpcs[i];
         const t   = npc.type || 'default';
         const si  = typeToIdx.has(t) ? typeToIdx.get(t) : 0;
-        // Dialog text: use npc.text, truncated to 35 chars
-        const rawText = (npc.text || '').slice(0, NPC_DIALOG_LEN - 1);
-        const dialogBytes = new Array(NPC_DIALOG_LEN).fill(0);
-        for (let c = 0; c < rawText.length; c++)
-            dialogBytes[c] = rawText.charCodeAt(c) & 0xFF;
+        const dialogBytes  = encodeDialog(npc.text);
+        const dialog2Bytes = encodeDialog(npc.conditionText);
+        const cv = getVarIdx(npc.conditionVariableId);
+        const rv = getVarIdx(npc.rewardVariableId);
+        const crv = getVarIdx(npc.conditionalRewardVariableId);
         entBuf.push(
             (npc.roomIndex || 0) & 0xFF,
             (npc.x || 0) & 0xFF,
             (npc.y || 0) & 0xFF,
             si & 0xFF,
-            ...dialogBytes
+            ...dialogBytes,
+            ...dialog2Bytes,
+            cv, rv, crv
         );
+    }
+    if (varToIdx.size > 0) {
+        console.log('[SMS] Variable map (' + varToIdx.size + '/' + MAX_VARS + '):',
+            Array.from(varToIdx.entries()));
     }
 
     /* ── project.inf / merging.dat ── */
