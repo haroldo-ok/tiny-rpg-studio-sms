@@ -238,15 +238,23 @@ void try_moving_actor_on_map(actor *act, resource_map_format *map, signed char d
 
 void player_find_start(resource_map_format *map) {
 	char *o = map->tiles;
+	char found = 0;
 	for (char y = 0; y != map->height; y++) {
 		for (char x = 0; x != map->width; x++) {
 			unsigned int tile_attr = get_tile_attr(*o);
 			if (tile_attr & TILE_ATTR_PLAYER_START) {
 				set_actor_map_xy(&player, x, y);
+				found = 1;
 			}
 			o++;
 		}
 	}
+	/* Defensive: if no PLAYER_START tile was found in the map, place the
+	   player at (1,1). Without this, init_actor's default (32,32) pixel
+	   position translates to grid (2,-1) — the -1 wraps to 255 in the
+	   movement handler, which triggers an unintended edge crossing on the
+	   first input. */
+	if (!found) set_actor_map_xy(&player, 1, 1);
 }
 
 char *skip_after_end_of_string(char *s) {
