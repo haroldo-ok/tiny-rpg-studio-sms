@@ -293,7 +293,7 @@ void wait_button_release() {
 }
 
 #define MAX_NPC_SPRITE_TYPES (8)
-#define MAX_NPCS (16)
+#define MAX_NPCS (32)
 #define NPC_DIALOG_LEN (36)
 #define NPC_ENTRY_LEN (4 + 2 * NPC_DIALOG_LEN + 3) /* room,x,y,type + 2 dialogs + 3 var ids */
 #define NPC_BASE_TILE(t) ((unsigned char)(8 + 16 + (unsigned char)(t) * 16))
@@ -447,6 +447,20 @@ static void init_npc_actors(unsigned char room_idx) {
 	}
 }
 
+/* Load the NPC sprite tiles for the given room into VRAM.
+   The JS generator emits up to one "roomNN.spr" file per room, each containing
+   up to MAX_NPC_SPRITE_TYPES sprite types × 16 sub-tiles × 32 bytes.
+   Tiles are loaded at VRAM slot 24 (right after the player's 16 tiles at slots 8-23). */
+static void load_room_sprites(unsigned char room_idx) {
+	char fname[16];
+	resource_entry_format *e;
+	sprintf(fname, "room%02d.spr", (int)(room_idx + 1));
+	e = resource_find(fname);
+	if (e && e->size > 0) {
+		SMS_loadTiles(resource_get_pointer(e), 24, e->size);
+	}
+}
+
 
 char gameplay_loop() {
 	unsigned int joy = SMS_getKeysStatus();
@@ -481,6 +495,7 @@ char gameplay_loop() {
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
 		player_find_start(map);
+		load_room_sprites((unsigned char)(map_number - 1));
 		init_npc_actors((unsigned char)(map_number - 1));
 
 		stage_clear = 0;
@@ -535,6 +550,7 @@ char gameplay_loop() {
 									if (map) {
 										prepare_map_data(map);
 										set_actor_map_xy(&player, wrap_x, wrap_y);
+										load_room_sprites((unsigned char)(map_number - 1));
 										init_npc_actors((unsigned char)(map_number - 1));
 										is_map_data_dirty = 1;
 									}

@@ -201,27 +201,51 @@ async function buildSMSRom() {
     const allNpcs = Array.isArray(gameData.sprites) ? gameData.sprites : [];
     const placedNpcs = allNpcs.filter(n => n.placed !== false);
 
-    // Normalize: strip -elf/-dwarf suffix when the base type exists in NPC_SPRITES.
-    // This lets a knight + knight-elf occupy a single VRAM slot.
-    const normalizeNpcType = (t) => {
-        const s = String(t || 'default');
-        if (NPC_SPRITES[s]) return s;                          // exact match wins
-        const base = s.replace(/-(elf|dwarf)$/, '');
+    // Build the canonical sprite key from TRS's (type, variant) pair.
+    // TRS stores race in npc.variant ('human' | 'elf' | 'dwarf' | 'fixed').
+    // The type already includes the suffix for elf/dwarf, but we double-check
+    // so any TRS quirks still find the right pixels.
+    const normalizeNpcType = (npc) => {
+        const t = String((npc && npc.type) || 'default');
+        const v = String((npc && npc.variant) || 'human');
+        // 1. Exact match (e.g. 'knight-elf' from TRS) wins
+        if (NPC_SPRITES[t]) return t;
+        // 2. If the type has no suffix and variant is elf/dwarf, try type-variant
+        if (v === 'elf' || v === 'dwarf') {
+            const composed = t.replace(/-(elf|dwarf)$/, '') + '-' + v;
+            if (NPC_SPRITES[composed]) return composed;
+        }
+        // 3. Strip suffix and try base type
+        const base = t.replace(/-(elf|dwarf)$/, '');
         return NPC_SPRITES[base] ? base : 'default';
     };
 
-    // Map normalized NPC type string → sprite_type index (0..N_NPC_SPRITE_TYPES-1)
-    const typeToIdx = new Map();
+    /* Per-room sprite-type assignment.
+       Each room gets its own set of up to N_NPC_SPRITE_TYPES slots. When the
+       player enters a room, the C code loads that room's sprite tiles into
+       VRAM slots 24..(24+128). The NPC's sprite_type byte stored in
+       entities.dat is the per-room slot index. */
+    const ROOM_COUNT = 9;
+    const roomTypeMaps = []; // [roomIdx] → Map(spriteName → slotIdx)
+    for (let r = 0; r < ROOM_COUNT; r++) roomTypeMaps.push(new Map());
+
+    let overflowCount = 0;
     for (const npc of placedNpcs) {
-        const t = normalizeNpcType(npc.type);
-        if (!typeToIdx.has(t) && typeToIdx.size < N_NPC_SPRITE_TYPES)
-            typeToIdx.set(t, typeToIdx.size);
+        const room = (npc.roomIndex|0);
+        if (room < 0 || room >= ROOM_COUNT) continue;
+        const sname = normalizeNpcType(npc);
+        const m = roomTypeMaps[room];
+        if (!m.has(sname)) {
+            if (m.size < N_NPC_SPRITE_TYPES) {
+                m.set(sname, m.size);
+            } else {
+                overflowCount++;
+            }
+        }
     }
-    // Report overflow so the user knows if the game has more variety than fits
-    const uniqueTypes = new Set(placedNpcs.map(n => normalizeNpcType(n.type)));
-    if (uniqueTypes.size > N_NPC_SPRITE_TYPES) {
-        console.warn('[SMS] ' + uniqueTypes.size + ' unique NPC visuals; only first ' +
-            N_NPC_SPRITE_TYPES + ' get their own sprite. Extras fall back to type 0.');
+    if (overflowCount > 0) {
+        console.warn('[SMS] ' + overflowCount + ' NPC visual(s) exceeded ' +
+            N_NPC_SPRITE_TYPES + ' types per room; extras fall back to slot 0.');
     }
 
     /* ── BG tiles ── */
@@ -238,17 +262,22 @@ async function buildSMSRom() {
 
     /* ── Build main.til ──
        Layout: BG[0] | player | NPC types 0..7 (always all 8 emitted) | BG[1..N]
-       Emitting all 8 NPC slots unconditionally keeps the C code's base_tile
-       math correct regardless of how many types are actually placed.
+       Emitting all N_NPC_SPRITE_TYPES NPC slots unconditionally keeps the C
+       code's base_tile math correct. We fill them with the START ROOM's
+       sprites so they look right at boot; the C will reload these slots on
+       each room transition via load_room_sprites().
     */
+    // Note: startRoom isn't known yet at this point — initialize with sane defaults,
+    // then patch the start room slot fill after we resolve it below.
     const tileBuf = [];
     tileBuf.push(...encodeBGTile(getTilePx(liveTiles[0]), palette));  // BG[0], tileNum 1
     tileBuf.push(...buildSpriteFrames(PLAYER_SP));                     // player, tileNums 2-5
-    for (let t = 0; t < N_NPC_SPRITE_TYPES; t++) {                    // NPC types 0..N-1
-        // Find the NPC type assigned to this slot (if any)
-        let spriteName = 'default';
-        for (const [k,v] of typeToIdx) { if (v === t) { spriteName = k; break; } }
-        tileBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));
+    // Sprite slots for room 0 will be patched in once startRoom is known.
+    // For now, emit zero placeholders; they get overwritten below.
+    const npcSlotOffset = tileBuf.length;
+    const NPC_BLOCK_SIZE = 512; // 16 sub-tiles × 32 bytes
+    for (let t = 0; t < N_NPC_SPRITE_TYPES; t++) {
+        for (let b = 0; b < NPC_BLOCK_SIZE; b++) tileBuf.push(0);
     }
     for (let i = 1; i < liveTiles.length; i++)
         tileBuf.push(...encodeBGTile(getTilePx(liveTiles[i]), palette)); // BG[1..N]
@@ -276,6 +305,21 @@ async function buildSMSRom() {
             startY    = (gd.start.y || 1) & 0xFF;
         }
     } catch(e) {}
+
+    /* Patch the NPC sprite slots in main.til with the start room's sprites,
+       so the boot screen renders correctly before the C code calls
+       load_room_sprites for the first time. */
+    {
+        const startMap = roomTypeMaps[startRoom] || new Map();
+        for (let s = 0; s < N_NPC_SPRITE_TYPES; s++) {
+            let spriteName = 'default';
+            for (const [k, v] of startMap) if (v === s) { spriteName = k; break; }
+            const frames = buildSpriteFrames(getNpcSprite(spriteName));
+            for (let b = 0; b < NPC_BLOCK_SIZE; b++) {
+                tileBuf[npcSlotOffset + s * NPC_BLOCK_SIZE + b] = frames[b];
+            }
+        }
+    }
 
     /* ── Start marker tile (TILE_ATTR_PLAYER_START) ──
        Same pixels as the ground tile at start position.
@@ -359,19 +403,21 @@ async function buildSMSRom() {
         for (let c = 0; c < text.length; c++) bytes[c] = text.charCodeAt(c) & 0xFF;
         return bytes;
     };
-    const nNpcs = Math.min(placedNpcs.length, 16);
+    const nNpcs = Math.min(placedNpcs.length, 32);
     const entBuf = [nNpcs];
     for (let i = 0; i < nNpcs; i++) {
-        const npc = placedNpcs[i];
-        const t   = normalizeNpcType(npc.type);
-        const si  = typeToIdx.has(t) ? typeToIdx.get(t) : 0;
+        const npc  = placedNpcs[i];
+        const room = (npc.roomIndex|0);
+        const t    = normalizeNpcType(npc);
+        const roomMap = roomTypeMaps[room] || new Map();
+        const si   = roomMap.has(t) ? roomMap.get(t) : 0;
         const dialogBytes  = encodeDialog(npc.text);
         const dialog2Bytes = encodeDialog(npc.conditionText);
         const cv = getVarIdx(npc.conditionVariableId);
         const rv = getVarIdx(npc.rewardVariableId);
         const crv = getVarIdx(npc.conditionalRewardVariableId);
         entBuf.push(
-            (npc.roomIndex || 0) & 0xFF,
+            room & 0xFF,
             (npc.x || 0) & 0xFF,
             (npc.y || 0) & 0xFF,
             si & 0xFF,
@@ -393,6 +439,25 @@ async function buildSMSRom() {
     const totalTN = startTileNum;
     const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
 
+    /* ── Per-room sprite files ──
+       For each room, emit a 4 KB file (8 sprite types × 16 sub-tiles × 32 bytes)
+       containing the sprite tile data for that room. The C code's
+       load_room_sprites() loads this into VRAM slots 24..151 on entry. */
+    const spriteFiles = [];
+    for (let r = 0; r < ROOM_COUNT; r++) {
+        const sprBuf = [];
+        const m = roomTypeMaps[r];
+        for (let s = 0; s < N_NPC_SPRITE_TYPES; s++) {
+            let spriteName = 'default';
+            for (const [k, v] of m) { if (v === s) { spriteName = k; break; } }
+            sprBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));
+        }
+        spriteFiles.push({
+            name: `room${String(r+1).padStart(2,'0')}.spr`,
+            content: sprBuf
+        });
+    }
+
     /* ── Assemble resource filesystem ── */
     setStatus('Building resource filesystem…', '#8af');
     const files = [
@@ -402,7 +467,8 @@ async function buildSMSRom() {
         { name:'entities.dat',content:entBuf },
         { name:'project.inf', content:projInfo },
         { name:'merging.dat', content:combos },
-        ...mapFiles
+        ...mapFiles,
+        ...spriteFiles
     ];
     const resourceData = buildResourceFS(files);
 
@@ -417,9 +483,12 @@ async function buildSMSRom() {
         .replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').toLowerCase() || 'my-tiny-rpg';
     const filename = `${safeTitle}.sms`;
 
-    const nTypes = typeToIdx.size;
-    const summary = `${kb} KB · ${liveTiles.length} tiles · ${placedNpcs.length} NPCs` +
-        ` (${nTypes} type${nTypes!==1?'s':''}) · start: room ${startRoom+1} (${startX},${startY})`;
+    // Count total unique sprite types across all rooms (for reporting only)
+    const allSprites = new Set();
+    for (const m of roomTypeMaps) for (const k of m.keys()) allSprites.add(k);
+    const nTypes = allSprites.size;
+    const summary = `${kb} KB · ${liveTiles.length} tiles · ${nNpcs} NPCs` +
+        ` (${nTypes} sprite${nTypes!==1?'s':''}) · start: room ${startRoom+1} (${startX},${startY})`;
 
     return { rom, filename, title, summary };
 }
