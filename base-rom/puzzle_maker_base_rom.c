@@ -237,10 +237,20 @@ void try_moving_actor_on_map(actor *act, resource_map_format *map, signed char d
 }
 
 void player_find_start(resource_map_format *map) {
-	char *o = map->tiles;
+	/* Read width/height while map's bank is still mapped, then iterate
+	   the RAM copy in map_data. This is necessary because get_tile_attr()
+	   internally calls resource_get_pointer(tile_attrs) which switches
+	   the ROM bank to main.atr's bank. After that switch, map->tiles is
+	   no longer accessible — reading *o would return garbage from a
+	   different bank. With small games that all fit in 1-2 banks the
+	   issue was masked; with larger resource budgets (e.g. 9 per-room
+	   sprite files) it becomes deterministic. */
+	char width  = (char)map->width;
+	char height = (char)map->height;
+	char *o = map_data;
 	char found = 0;
-	for (char y = 0; y != map->height; y++) {
-		for (char x = 0; x != map->width; x++) {
+	for (char y = 0; y != height; y++) {
+		for (char x = 0; x != width; x++) {
 			unsigned int tile_attr = get_tile_attr(*o);
 			if (tile_attr & TILE_ATTR_PLAYER_START) {
 				set_actor_map_xy(&player, x, y);
@@ -249,11 +259,6 @@ void player_find_start(resource_map_format *map) {
 			o++;
 		}
 	}
-	/* Defensive: if no PLAYER_START tile was found in the map, place the
-	   player at (1,1). Without this, init_actor's default (32,32) pixel
-	   position translates to grid (2,-1) — the -1 wraps to 255 in the
-	   movement handler, which triggers an unintended edge crossing on the
-	   first input. */
 	if (!found) set_actor_map_xy(&player, 1, 1);
 }
 
@@ -462,10 +467,18 @@ static void init_npc_actors(unsigned char room_idx) {
 static void load_room_sprites(unsigned char room_idx) {
 	char fname[16];
 	resource_entry_format *e;
+	unsigned int size;
+	void *ptr;
 	sprintf(fname, "room%02d.spr", (int)(room_idx + 1));
 	e = resource_find(fname);
 	if (e && e->size > 0) {
-		SMS_loadTiles(resource_get_pointer(e), 24, e->size);
+		/* Cache fields from the resource entry BEFORE calling
+		   resource_get_pointer — that call switches the ROM bank away
+		   from RESOURCE_BANK, so any later read of e->field would return
+		   garbage from a different bank. */
+		size = e->size;
+		ptr  = resource_get_pointer(e);
+		SMS_loadTiles(ptr, 24, size);
 	}
 }
 
