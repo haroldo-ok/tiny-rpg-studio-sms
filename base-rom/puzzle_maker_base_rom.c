@@ -55,6 +55,14 @@ char stage_clear;
 
 char map_data[9*16], map_floor[9*16];
 char is_map_data_dirty;
+/* Cached map dimensions, populated by prepare_map_data().
+   We avoid reading map->width / map->height at runtime because that
+   would require the map's ROM bank to be mapped at that moment — and
+   subsequent calls to load_room_sprites / get_tile_attr / etc. switch
+   the bank away. With large games (multiple banks of resources) the
+   stale banked reads return garbage. */
+unsigned char current_map_width  = 8;
+unsigned char current_map_height = 8;
 
 resource_entry_format *resource_find(char *name) {
 	SMS_mapROMBank(RESOURCE_BANK);
@@ -109,7 +117,10 @@ void draw_tile(char x, char y, unsigned int tileNumber) {
 }
 
 inline char *get_map_tile_pointer(resource_map_format *map, char *data, char x, char y) {
-	return data + (y * map->width) + x;
+	/* Use the cached width to avoid banked read of map->width.
+	   The map parameter is kept for API compatibility. */
+	(void)map;
+	return data + (y * current_map_width) + x;
 }
 
 char get_map_tile(resource_map_format *map, char x, char y) {
@@ -153,14 +164,21 @@ resource_map_format *load_map(int n) {
 }
 
 void prepare_map_data(resource_map_format *map) {
-	memcpy(map_data, map->tiles, map->height * map->width);
-	memcpy(map_floor, 0, map->height * map->width);
+	/* Cache the dimensions while map's ROM bank is still mapped.
+	   Subsequent ROM-bank switches (e.g. load_room_sprites or
+	   get_tile_attr) make map->width / map->height unreadable. */
+	current_map_width  = (unsigned char)map->width;
+	current_map_height = (unsigned char)map->height;
+	memcpy(map_data, map->tiles, (unsigned int)current_map_height * current_map_width);
+	memcpy(map_floor, 0, (unsigned int)current_map_height * current_map_width);
 }
 
 void draw_map(resource_map_format *map) {
+	/* Use cached dimensions, not banked struct fields. */
+	(void)map;
 	char *o = map_data;
-	for (char y = 0; y != map->height; y++) {
-		for (char x = 0; x != map->width; x++) {
+	for (char y = 0; y != (char)current_map_height; y++) {
+		for (char x = 0; x != (char)current_map_width; x++) {
 			draw_tile(x << 1, y << 1, *o);
 			o++;
 		}
@@ -183,7 +201,7 @@ void set_actor_map_xy(actor *act, char x, char y) {
 char try_pushing_tile_on_map(resource_map_format *map, char x, char y, signed char delta_x, signed char delta_y) {
 	char new_x = x + delta_x;
 	char new_y = y + delta_y;
-	if (new_x >= map->width || new_y >= map->height) return 0;
+	if (new_x >= (char)current_map_width || new_y >= (char)current_map_height) return 0;
 
 	char target_tile = get_map_tile(map, new_x, new_y);
 	char source_tile = get_map_tile(map, x, y);	
@@ -220,7 +238,7 @@ void try_moving_actor_on_map(actor *act, resource_map_format *map, signed char d
 	
 	char new_x = x + delta_x;
 	char new_y = y + delta_y;
-	if (new_x >= map->width || new_y >= map->height) return;
+	if (new_x >= (char)current_map_width || new_y >= (char)current_map_height) return;
 	
 	char tile = get_map_tile(map, new_x, new_y);
 	unsigned int tile_attr = get_tile_attr(tile);	
@@ -237,20 +255,16 @@ void try_moving_actor_on_map(actor *act, resource_map_format *map, signed char d
 }
 
 void player_find_start(resource_map_format *map) {
-	/* Read width/height while map's bank is still mapped, then iterate
-	   the RAM copy in map_data. This is necessary because get_tile_attr()
-	   internally calls resource_get_pointer(tile_attrs) which switches
-	   the ROM bank to main.atr's bank. After that switch, map->tiles is
-	   no longer accessible — reading *o would return garbage from a
-	   different bank. With small games that all fit in 1-2 banks the
-	   issue was masked; with larger resource budgets (e.g. 9 per-room
-	   sprite files) it becomes deterministic. */
-	char width  = (char)map->width;
-	char height = (char)map->height;
+	/* Read map tile data from the RAM copy populated by prepare_map_data.
+	   Dimensions come from the cached globals (current_map_width/height)
+	   instead of map->width/height, since get_tile_attr() inside the loop
+	   switches the ROM bank to main.atr's bank. That would make any
+	   subsequent banked read of map->* return garbage. */
+	(void)map;
 	char *o = map_data;
 	char found = 0;
-	for (char y = 0; y != height; y++) {
-		for (char x = 0; x != width; x++) {
+	for (char y = 0; y != (char)current_map_height; y++) {
+		for (char x = 0; x != (char)current_map_width; x++) {
 			unsigned int tile_attr = get_tile_attr(*o);
 			if (tile_attr & TILE_ATTR_PLAYER_START) {
 				set_actor_map_xy(&player, x, y);
@@ -259,6 +273,7 @@ void player_find_start(resource_map_format *map) {
 			o++;
 		}
 	}
+	/* Defensive fallback if no PLAYER_START tile is in the map. */
 	if (!found) set_actor_map_xy(&player, 1, 1);
 }
 
@@ -518,6 +533,7 @@ char gameplay_loop() {
 		player_find_start(map);
 		load_room_sprites((unsigned char)(map_number - 1));
 		init_npc_actors((unsigned char)(map_number - 1));
+		/* ============================================================ */
 
 		stage_clear = 0;
 		is_map_data_dirty = 0;

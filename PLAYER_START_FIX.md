@@ -1,57 +1,62 @@
-Bank-switching fix in player_find_start
-========================================
+Bank-safety fix for runtime map field reads
+=============================================
 
 Symptom
 -------
-With a world that uses many distinct NPC visuals (e.g. several races plus
-wooden-sign / thought-bubble extras), the player would teleport to the
-neighbouring map (typically map 2) on the very first directional input.
+On worlds with many distinct NPC visuals plus "extras" (wooden-sign,
+thought-bubble), the player would teleport to map 2 on the first
+directional input. After that single glitch, the rest of the game
+behaved correctly.
 
 Root cause
 ----------
-player_find_start() reads `map->tiles` directly from banked ROM:
+Several C runtime functions read `map->width` and `map->height` directly
+from the level file's struct, which lives in banked ROM. The bank
+window containing the level file is overwritten by every later
+`resource_get_pointer` call. By the time the first input is processed,
+the bank is mapped to either main.atr (from `get_tile_attr`) or
+roomNN.spr (from `load_room_sprites`), and reading `map->width` returns
+whatever byte sits at offset 2 of that other file.
 
-    char *o = map->tiles;
-    for (char y = 0; y != map->height; y++) {
-        for (char x = 0; x != map->width; x++) {
-            unsigned int tile_attr = get_tile_attr(*o);
-            ...
-        }
-    }
+When the garbage width is used in `get_map_tile_pointer`, the offset
+calculation lands outside the `map_data` array. Whichever RAM byte sits
+at that bogus offset gets interpreted as a tile number and fed to
+`get_tile_attr`. With enough resources in the FS (≥24 NPCs + 9 per-room
+sprite files spanning four banks), that random byte often produced an
+attribute word with `TILE_ATTR_PLAYER_END` (bit 0x04) set. That sets
+`stage_clear = 1`, the inner do/while exits, `map_number++`, and the
+outer while restarts on map 2 with consistent bank state — which is why
+the bug only happened once.
 
-get_tile_attr() in turn calls resource_get_pointer(tile_attrs), which
-switches the ROM bank window to main.atr's bank. After that call, `o`
-still points to the same logical address, but that address now exposes
-the bytes of a DIFFERENT file (whichever was mapped in last). The next
-iteration's `*o` reads garbage.
-
-With small games that fit in one or two banks, the issue was masked
-because both files happened to be co-resident. With the new per-room
-sprite layout (~50 KB across 4 banks), main.atr and level001.map end up
-in different banks, so the bug becomes deterministic.
-
-The downstream symptom of garbage tile numbers is that some random
-"tile" eventually returns a tile_attr with the TILE_ATTR_PLAYER_START
-bit set, so the player is positioned at some (x,y) that doesn't
-correspond to the real start tile. From there, the movement handler's
-unsigned-char wraparound (-1 ⇒ 255) triggers the world-edge-crossing
-branch on the first input.
+Why small worlds were unaffected
+--------------------------------
+With only one or two banks of resources, several files were co-resident
+in the same 16KB window. Even after a bank switch, `map->width` happened
+to land on a byte that arithmetic happened to make harmless. The bug was
+latent, not absent.
 
 Fix
 ---
-1. player_find_start() now iterates the in-RAM `map_data` copy that
-   prepare_map_data() already produced. Width and height are read once
-   into locals before any banking happens. Bank switches inside
-   get_tile_attr() no longer affect the iteration.
+Cache the level dimensions in RAM in `prepare_map_data`:
 
-2. As an extra defense, if no PLAYER_START tile is found at all,
-   the player defaults to (1, 1) instead of staying at init_actor's
-   (32, 32) pixel position which would map to grid (2, -1) and trigger
-   the same wraparound bug.
+    unsigned char current_map_width  = 8;
+    unsigned char current_map_height = 8;
 
-3. load_room_sprites() now caches e->size to a local before calling
-   resource_get_pointer(e), since the call switches the ROM bank away
-   from RESOURCE_BANK where the entry lives. C does not guarantee that
-   the third function argument is evaluated before the first, so the
-   original `SMS_loadTiles(resource_get_pointer(e), 24, e->size)` could
-   read e->size from the wrong bank under some evaluation orders.
+Every runtime function that previously read `map->width` / `map->height`
+(`get_map_tile_pointer`, `draw_map`, `try_moving_actor_on_map`,
+`try_pushing_tile_on_map`, `player_find_start`) now reads from the RAM
+globals instead. Bank switches no longer affect map dimensions.
+
+Supporting fixes
+----------------
+- `player_find_start` reads the in-RAM `map_data` copy instead of
+  `map->tiles` (banked), since `get_tile_attr` inside the loop switches
+  the bank.
+- `player_find_start` defaults to (1,1) if no `PLAYER_START` tile is
+  found, so corrupted attribute reads cannot leave the player at
+  `init_actor`'s default pixel (32,32), which maps to grid (2,-1) and
+  triggers a different edge-cross wraparound bug.
+- `load_room_sprites` caches `e->size` before `resource_get_pointer`,
+  since C does not guarantee the third function argument is evaluated
+  before the first; the call switches the bank away from RESOURCE_BANK
+  where `e` lives.
