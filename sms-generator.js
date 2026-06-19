@@ -633,12 +633,25 @@ async function buildSMSRom() {
        4 BG tiles appended right after the start marker for the
        4 supported object types: key, door, door-variable, player-end.
        The C side discovers their tile numbers from the header of
-       objects.dat — see objBuf below. */
+       objects.dat — see objBuf below.
+       
+       Object sprites are 8x8 matrices of *palette indices* (or null for
+       transparent), while encodeBGTile expects 8x8 of *hex color strings*.
+       We composite the object on top of BG[0]'s pixels (the default floor
+       tile) so null cells visually fall back to the floor — that way an
+       object placed on grass appears as "object on grass" rather than
+       "object on palette[0]". */
     const OBJECT_TYPE_ORDER = ['key', 'door', 'door-variable', 'player-end'];
     const objectTileFirst = startTileNum + 1;
+    const floorPxHex = getTilePx(liveTiles[0]);
     for (let i = 0; i < OBJECT_TYPE_ORDER.length; i++) {
-        const px = getObjectSprite(OBJECT_TYPE_ORDER[i]);
-        tileBuf.push(...encodeBGTile(px, palette));
+        const matrix = getObjectSprite(OBJECT_TYPE_ORDER[i]);
+        const composed = matrix.map((row, r) => row.map((v, c) => {
+            if (v != null) return palette[v] || palette[0];
+            const fr = floorPxHex[r];
+            return (fr && fr[c]) || palette[0];
+        }));
+        tileBuf.push(...encodeBGTile(composed, palette));
         const tn = objectTileFirst + i;
         // Extend attrBuf so far — all zero (no SOLID/PLAYER_END flags,
         // since interaction is intercepted in C before the SOLID check)
