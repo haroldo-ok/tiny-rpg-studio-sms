@@ -360,6 +360,10 @@ static void var_set(unsigned char i) {
 	if (i >= NUM_GAME_VARS) return;
 	game_vars[i >> 3] |= (unsigned char)(1 << (i & 7));
 }
+static void var_clear(unsigned char i) {
+	if (i >= NUM_GAME_VARS) return;
+	game_vars[i >> 3] &= (unsigned char)~(1 << (i & 7));
+}
 /* ── Object system ──
    Objects (keys, doors, magic doors, player-end) are placed on the map
    in the editor and stored in a runtime array. Each object instance
@@ -375,13 +379,25 @@ static void var_set(unsigned char i) {
    the player should actually move into the cell.                  */
 
 #define MAX_OBJECTS (32)
+/* Object TYPE codes. Match OBJ_TYPE_MAP on the JS side. */
 #define OBJ_TYPE_KEY            (0)
 #define OBJ_TYPE_DOOR           (1)
 #define OBJ_TYPE_DOOR_VARIABLE  (2)
 #define OBJ_TYPE_PLAYER_END     (3)
-#define N_OBJ_TYPES             (4)
+#define OBJ_TYPE_SWITCH         (4)
+#define N_OBJ_TYPES             (5)
+/* TILE indices in the objects.dat header. For most types index == type,
+   except SWITCH which contributes two tile slots (off + on visual). */
+#define OBJ_TILE_KEY            (0)
+#define OBJ_TILE_DOOR           (1)
+#define OBJ_TILE_DOOR_VARIABLE  (2)
+#define OBJ_TILE_PLAYER_END     (3)
+#define OBJ_TILE_SWITCH_OFF     (4)
+#define OBJ_TILE_SWITCH_ON      (5)
+#define N_OBJ_TILES             (6)
 #define OBJECT_FLOOR_TILE       (1)   /* tile to draw after collect/open */
 #define OBJECT_STATE_DONE       (0x01)
+#define OBJECT_STATE_ON         (0x02)
 
 typedef struct {
 	unsigned char type;
@@ -396,9 +412,10 @@ static object_t      objects[MAX_OBJECTS];
 static unsigned char object_count;
 static unsigned char player_keys;
 /* Per-type BG tile numbers; filled from the header of objects.dat.
-   The JS encoder writes these as the first N_OBJ_TYPES bytes so the
-   C side stays agnostic to the BG-tile-count + object-tile layout. */
-static unsigned char object_tile_for_type[N_OBJ_TYPES];
+   The JS encoder writes these as the first N_OBJ_TILES bytes so the
+   C side stays agnostic to the BG-tile-count + object-tile layout.
+   Indices: KEY, DOOR, DOOR_VARIABLE, PLAYER_END, SWITCH_OFF, SWITCH_ON. */
+static unsigned char object_tile_for_type[N_OBJ_TILES];
 
 static void load_objects(void) {
 	unsigned char i;
@@ -406,16 +423,16 @@ static void load_objects(void) {
 	resource_entry_format *e;
 
 	object_count = 0;
-	for (i = 0; i < N_OBJ_TYPES; i++) object_tile_for_type[i] = 0;
+	for (i = 0; i < N_OBJ_TILES; i++) object_tile_for_type[i] = 0;
 
 	e = resource_find("objects.dat");
 	if (!e) return;
-	if (e->size < (unsigned int)(N_OBJ_TYPES + 1)) return;
+	if (e->size < (unsigned int)(N_OBJ_TILES + 1)) return;
 	p = (unsigned char *)resource_get_pointer(e);
 	if (!p) return;
 
-	for (i = 0; i < N_OBJ_TYPES; i++) object_tile_for_type[i] = p[i];
-	p += N_OBJ_TYPES;
+	for (i = 0; i < N_OBJ_TILES; i++) object_tile_for_type[i] = p[i];
+	p += N_OBJ_TILES;
 
 	object_count = *p++;
 	if (object_count > MAX_OBJECTS) object_count = MAX_OBJECTS;
@@ -433,15 +450,22 @@ static void load_objects(void) {
 
 /* Paint not-yet-consumed objects of the given room onto map_data.
    Skips the player-start cell so player_find_start can still locate it
-   on the initial map setup (called after player_find_start there). */
+   on the initial map setup (called after player_find_start there).
+   For switches, picks the OFF or ON tile based on the OBJECT_STATE_ON bit. */
 static void apply_objects_to_map(unsigned char room) {
-	unsigned char i, idx, tile;
+	unsigned char i, idx, tile_index, tile;
 	for (i = 0; i < object_count; i++) {
 		if (objects[i].room != room) continue;
 		if (objects[i].state & OBJECT_STATE_DONE) continue;
 		if (objects[i].type >= N_OBJ_TYPES) continue;
 		if (objects[i].x >= 8 || objects[i].y >= 8) continue;
-		tile = object_tile_for_type[objects[i].type];
+		if (objects[i].type == OBJ_TYPE_SWITCH) {
+			tile_index = (objects[i].state & OBJECT_STATE_ON)
+				? OBJ_TILE_SWITCH_ON : OBJ_TILE_SWITCH_OFF;
+		} else {
+			tile_index = objects[i].type;
+		}
+		tile = object_tile_for_type[tile_index];
 		if (tile == 0) continue;
 		idx = objects[i].y * 8 + objects[i].x;
 		map_data[idx] = tile;
@@ -495,6 +519,19 @@ static char handle_object_at(unsigned char idx) {
 			return 0;
 		case OBJ_TYPE_PLAYER_END:
 			stage_clear = 1;
+			return 1;
+		case OBJ_TYPE_SWITCH:
+			/* Toggle the OBJECT_STATE_ON bit and the linked variable.
+			   The switch is walkable, so we always allow the move. */
+			obj->state ^= OBJECT_STATE_ON;
+			if (obj->state & OBJECT_STATE_ON) {
+				map_data[map_idx] = object_tile_for_type[OBJ_TILE_SWITCH_ON];
+				if (obj->variable_id != VAR_NONE) var_set(obj->variable_id);
+			} else {
+				map_data[map_idx] = object_tile_for_type[OBJ_TILE_SWITCH_OFF];
+				if (obj->variable_id != VAR_NONE) var_clear(obj->variable_id);
+			}
+			is_map_data_dirty = 1;
 			return 1;
 	}
 	return 1;
