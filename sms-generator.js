@@ -175,6 +175,294 @@ function getNpcSprite(type) {
     return NPC_SPRITES[base] || NPC_SPRITES['default'];
 }
 
+// Object sprite matrices (8x8 palette indices), extracted from TRS ObjectSprites.ts
+const OBJECT_SPRITES = {
+    'player-start': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null,  1,  1,  1,  1,  1,  1, null ],
+        [ null,  1,  3,  3,  3,  3,  1, null ],
+        [ null,  1,  3,  3, 11,  3,  1, null ],
+        [ null,  1,  3, 11,  3,  3,  1, null ],
+        [ null,  1,  3,  3,  3,  3,  1, null ],
+        [ null,  1,  1,  1,  1,  1,  1, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'player-end': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null,  1,  1,  1,  1,  1,  1, null ],
+        [ null,  1,  2,  2,  2,  2,  1, null ],
+        [ null,  1,  2,  2, 14,  2,  1, null ],
+        [ null,  1,  2, 14,  2,  2,  1, null ],
+        [ null,  1,  2,  2,  2,  2,  1, null ],
+        [ null,  1,  1,  1,  1,  1,  1, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    switch: [
+        [ null, null, null, null, null, null, null, null ],
+        [  8, null, null, null, null, null, null, null ],
+        [ null,  6, null, null, null, null, null, null ],
+        [ null, null,  6, null, null, null, null, null ],
+        [ null, null, null,  6, null, null, null, null ],
+        [ null, null,  6,  1,  1,  6, null, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'switch--on': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null, null, null, null, null, null, 12 ],
+        [ null, null, null, null, null, null,  6, null ],
+        [ null, null, null, null, null,  6, null, null ],
+        [ null, null, null, null,  6, null, null, null ],
+        [ null, null,  6,  1,  1,  6, null, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    key: [
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ],
+        [ 10, 10,  7, null, null, null, null, null ],
+        [ 10, null, 10, 10, 10, 10, 10, 10 ],
+        [  9,  9,  9, null, null,  9, null,  9 ],
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    door: [
+        [ null,  4,  4,  4,  4,  4,  4, null ],
+        [  4,  9,  9,  9,  9,  9,  9,  4 ],
+        [  4,  9,  9,  9,  9,  9,  9,  4 ],
+        [  4,  9,  9,  9,  0,  0,  9,  4 ],
+        [  4,  9,  9,  9,  0,  0,  9,  4 ],
+        [  4,  9,  9,  9,  9,  0,  9,  4 ],
+        [  4,  9,  9,  9,  9,  9,  9,  4 ],
+        [  4,  9,  9,  9,  9,  9,  9,  4 ]
+    ],
+    'door-variable': [
+        [ null,  7, null,  7, null,  7, null,  7 ],
+        [ null,  6,  6,  6,  6,  6,  6,  6 ],
+        [ null,  6, 13,  6, 13,  6, 13,  6 ],
+        [ null,  6, null,  6, null,  6, null,  6 ],
+        [ null,  6, null,  6, null,  6, null,  5 ],
+        [ null,  6,  6,  6,  6,  6,  6,  6 ],
+        [ null,  6, 13,  6, 13,  6, 13,  6 ],
+        [ null,  6, null,  6, null,  6, null,  6 ]
+    ],
+    'life-potion': [
+        [ null, null,  1,  1,  1,  1, null, null ],
+        [ null,  1,  1,  1,  1,  1,  1, null ],
+        [ null, null,  6, null, null,  6, null, null ],
+        [ null, null,  6,  8,  8,  6, null, null ],
+        [ null,  6,  8,  8,  8,  8,  6, null ],
+        [  6,  8,  8,  8,  6,  8,  8,  6 ],
+        [ null,  6,  8,  6,  8,  8,  6, null ],
+        [ null, null,  6,  6,  6,  6, null, null ]
+    ],
+    'xp-scroll': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null,  6,  6,  6,  6,  6,  6 ],
+        [ null, null,  6,  1,  1,  1,  6,  0 ],
+        [ null, null,  6,  6,  6,  6,  6, null ],
+        [ null, null,  6,  1,  1,  1,  6, null ],
+        [ null, null,  6,  6,  6,  6,  6, null ],
+        [ null,  0,  6,  1,  1,  6,  6, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ]
+    ],
+    sword: [
+        [ null, null, null, null, null, null, null, null ],
+        [  6,  6, null, null, null, null, null, null ],
+        [  6,  6,  6, null, null, null, null, null ],
+        [ null,  6,  6,  6, null, null, null, null ],
+        [ null, null,  6,  6,  6, null,  1, null ],
+        [ null, null, null,  6,  8,  1,  1, null ],
+        [ null, null, null, null,  1,  1, null, null ],
+        [ null, null, null,  1,  1, null,  1, null ]
+    ],
+    'sword-bronze': [
+        [ null, null, null, null, null, null, null, null ],
+        [  9,  9, null, null, null, null, null, null ],
+        [  9, 10,  9, null, null, null, null, null ],
+        [ null,  9,  9, 10, null, null, null, null ],
+        [ null, null,  9,  9, 10, null,  1, null ],
+        [ null, null, null,  9,  9,  1,  1, null ],
+        [ null, null, null, null,  1,  1, null, null ],
+        [ null, null, null,  1,  1, null,  1, null ]
+    ],
+    'sword-wood': [
+        [ null, null, null, null, null, null, null, null ],
+        [  4,  4, null, null, null, null, null, null ],
+        [  4,  5,  4, null, null, null, null, null ],
+        [ null,  4,  4,  5, null, null, null, null ],
+        [ null, null,  4,  4,  5, null,  1, null ],
+        [ null, null, null,  4,  9,  1,  1, null ],
+        [ null, null, null, null,  1,  1, null, null ],
+        [ null, null, null,  1,  1, null,  1, null ]
+    ],
+    'logic-gate-not': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null,  6,  6, null, null, null, null, null ],
+        [ null,  6,  6,  6,  6, null, null, null ],
+        [ null,  6,  6,  6,  6,  6,  6,  7 ],
+        [ null,  6,  6,  6,  6,  6,  6,  7 ],
+        [ null,  6,  6,  6,  6, null, null, null ],
+        [ null,  6,  6, null, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'logic-gate-and': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null,  6,  6,  6,  6,  6, null, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null,  6,  6,  6,  6,  6, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'logic-gate-or': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null,  6,  6,  6, null, null, null, null ],
+        [ null, null,  6,  6,  6,  6, null, null ],
+        [ null, null,  6,  6,  6,  6,  6, null ],
+        [ null, null,  6,  6,  6,  6,  6, null ],
+        [ null, null,  6,  6,  6,  6, null, null ],
+        [ null,  6,  6,  6, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'logic-gate-nand': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null,  6,  6,  6,  6,  6, null, null ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null,  6,  6,  6,  6,  6,  6,  7 ],
+        [ null,  6,  6,  6,  6,  6,  6,  7 ],
+        [ null,  6,  6,  6,  6,  6,  6, null ],
+        [ null,  6,  6,  6,  6,  6, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'logic-gate-nor': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null,  6,  6,  6, null, null, null, null ],
+        [ null, null,  6,  6,  6,  6, null, null ],
+        [ null, null,  6,  6,  6,  6,  6,  7 ],
+        [ null, null,  6,  6,  6,  6,  6,  7 ],
+        [ null, null,  6,  6,  6,  6, null, null ],
+        [ null,  6,  6,  6, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'logic-led': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null,  5,  5,  5,  5, null, null ],
+        [ null,  5,  5,  5,  5,  5,  5, null ],
+        [ null,  5,  5,  5,  5,  5,  5, null ],
+        [ null,  5,  5,  5,  5,  5,  5, null ],
+        [ null,  5,  5,  5,  5,  5,  5, null ],
+        [ null, null,  5,  5,  5,  5, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'logic-led--on': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null,  7, 10, 10,  7, null, null ],
+        [ null,  7, 10, 10, 10, 10,  7, null ],
+        [ null,  7, 10, 10, 10, 10,  7, null ],
+        [ null,  7, 10, 10, 10, 10,  7, null ],
+        [ null,  7, 10, 10, 10, 10,  7, null ],
+        [ null, null,  7, 10, 10,  7, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    armor: [
+        [ null,  null,   1,   1,   1,   1,  null,  null ],
+        [  1,   1,   1,   6,   6,   1,   1,   1 ],
+        [  1,   6,   6,   6,   6,   6,   6,   1 ],
+        [  1,   6,   6,   6,   6,   6,   6,   1 ],
+        [  1,   1,   6,   6,   6,   6,   1,   1 ],
+        [ null,   1,   7,   5,   5,   7,   1,  null ],
+        [ null,   1,   6,   6,   6,   6,   1,  null ],
+        [ null,   1,   1,   1,   1,   1,   1,  null ]
+    ],
+    boots: [
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [  1,   1,   1,  null,   1,   1,   1,  null ],
+        [  1,   4,   1,   1,   1,   4,   1,   1 ],
+        [  1,   4,  15,   1,   1,   4,  15,   1 ],
+        [  1,   4,   4,   1,   1,   4,   4,   1 ],
+        [  1,   1,   1,   1,   1,   1,   1,   1 ]
+    ],
+    trap: [
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null,  1, null, null, null,  1, null ],
+        [ null,  1,  5,  1, null,  1,  5,  1 ],
+        [ null,  5,  5,  5, null,  5,  5,  5 ],
+        [ null, null,  1, null, null, null,  1, null ],
+        [ null,  1,  5,  1, null,  1,  5,  1 ],
+        [ null,  5,  5,  5, null,  5,  5,  5 ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'trap--on': [
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,   1,   1,   1,  null,   1,   1,   1 ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,   1,   1,   1,  null,   1,   1,   1 ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ]
+    ],
+    'push-box': [
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,   1,   1,   1,   1,   1,   1,  null ],
+        [ null,   1,   4,   4,   4,   4,   1,  null ],
+        [ null,   1,   4,   4,   4,   4,   1,  null ],
+        [ null,   1,   1,   1,   1,   1,   1,  null ],
+        [ null,   1,   4,   4,   4,   4,   1,  null ],
+        [ null,   1,   1,   1,   1,   1,   1,  null ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ]
+    ],
+    'pressure-plate': [
+        [ null,  null,  null,  null,  null,  null,  null,  null ],
+        [ null,   1,   1,   1,   1,   1,   1,  null ],
+        [ null,   1,   6,   6,   6,   6,   1,  null ],
+        [ null,   1,   6,   7,   6,   6,   1,  null ],
+        [ null,   1,   6,   6,   7,   6,   1,  null ],
+        [ null,   1,   6,   6,   6,   6,   1,  null ],
+        [ null,   1,   1,   1,   1,   1,   1,  null ],
+        [ null,  null,  null,  null,  null,  null,  null,  null ]
+    ],
+    'pressure-plate--on': [
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ],
+        [  1,  1,  1,  1,  1,  1,  1,  1 ],
+        [  1, 12, 12, 12, 12, 12, 12,  1 ],
+        [  1, 12, 12, 12, 12, 12, 12,  1 ],
+        [  1,  1,  1,  1,  1,  1,  1,  1 ],
+        [ null, null, null, null, null, null, null, null ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    chest: [
+        [ null, null, null, null, null, null, null, null ],
+        [  5,  5,  5,  5,  5,  5,  5,  5 ],
+        [  4,  9,  9,  9,  9,  9,  9,  4 ],
+        [  4,  4,  4, 10, 10,  4,  4,  4 ],
+        [  4,  4,  4,  4,  4,  4,  4,  4 ],
+        [  4,  9,  9,  9,  9,  9,  9,  4 ],
+        [  5,  5,  5,  5,  5,  5,  5,  5 ],
+        [ null, null, null, null, null, null, null, null ]
+    ],
+    'chest--on': [
+        [  5,   9,   9,  10,  10,   9,   9,   5 ],
+        [  4,   1,   1,   1,   1,   1,   1,   4 ],
+        [  4,   4,   1,   1,   1,   1,   4,   4 ],
+        [  4,   4,   4,   1,   1,   4,   4,   4 ],
+        [  4,   4,   4,   4,   4,   4,   4,   4 ],
+        [  4,   9,   9,   9,   9,   9,   9,   4 ],
+        [  5,   5,   5,   5,   5,   5,   5,   5 ],
+        [ null, null, null, null, null, null, null, null ]
+    ]
+};
+function getObjectSprite(name) {
+    return OBJECT_SPRITES[name] || OBJECT_SPRITES['key'];
+}
+
+
 async function buildSMSRom() {
     const api = window.TinyRPGMaker;
     if (!api) throw new Error('Engine not ready — please wait and try again.');
@@ -341,6 +629,23 @@ async function buildSMSRom() {
     attrBuf[(startTileNum-1)*2]   = 0x02;
     attrBuf[(startTileNum-1)*2+1] = 0x00;
 
+    /* ── Object tiles ──
+       4 BG tiles appended right after the start marker for the
+       4 supported object types: key, door, door-variable, player-end.
+       The C side discovers their tile numbers from the header of
+       objects.dat — see objBuf below. */
+    const OBJECT_TYPE_ORDER = ['key', 'door', 'door-variable', 'player-end'];
+    const objectTileFirst = startTileNum + 1;
+    for (let i = 0; i < OBJECT_TYPE_ORDER.length; i++) {
+        const px = getObjectSprite(OBJECT_TYPE_ORDER[i]);
+        tileBuf.push(...encodeBGTile(px, palette));
+        const tn = objectTileFirst + i;
+        // Extend attrBuf so far — all zero (no SOLID/PLAYER_END flags,
+        // since interaction is intercepted in C before the SOLID check)
+        while (attrBuf.length < tn * 2) attrBuf.push(0);
+    }
+    const objectTileLast = objectTileFirst + OBJECT_TYPE_ORDER.length - 1;
+
     /* ── Maps ── */
     setStatus('Encoding maps…', '#8af');
     const mapFiles = [];
@@ -431,12 +736,63 @@ async function buildSMSRom() {
             Array.from(varToIdx.entries()));
     }
 
+    /* ── objects.dat ──
+       Header (N_OBJ_TYPES = 4 bytes): BG tile number for each object type,
+                                       in the same order as OBJ_TYPE_KEY..PLAYER_END
+                                       on the C side. The C code consults this
+                                       header so it doesn't have to know the tile
+                                       layout (which depends on number of BG tiles).
+       Byte 4:                       object_count (0..32)
+       Bytes 5..:                    per object, 6 bytes:
+                                         type      0..3 (KEY/DOOR/DOOR_VARIABLE/PLAYER_END)
+                                         room      0..8
+                                         x, y      0..7
+                                         var_idx   0..31 or 0xFF
+                                         flags     reserved, written as 0   */
+    const OBJ_TYPE_MAP = {
+        'key':            0,
+        'door':           1,
+        'door-variable':  2,
+        'player-end':     3,
+    };
+    const MAX_OBJECTS = 32;
+    const rawObjects = Array.isArray(gameData.objects) ? gameData.objects : [];
+    const placedObjects = rawObjects.filter(o =>
+        o && o.type && OBJ_TYPE_MAP[o.type] !== undefined &&
+        Number.isFinite(o.roomIndex) && o.roomIndex >= 0 && o.roomIndex < ROOM_COUNT &&
+        Number.isFinite(o.x) && o.x >= 0 && o.x < 8 &&
+        Number.isFinite(o.y) && o.y >= 0 && o.y < 8
+    ).slice(0, MAX_OBJECTS);
+    const objBuf = [];
+    // Header: tile numbers
+    for (let i = 0; i < OBJECT_TYPE_ORDER.length; i++) {
+        objBuf.push((objectTileFirst + i) & 0xFF);
+    }
+    // Count and instances
+    objBuf.push(placedObjects.length & 0xFF);
+    for (const o of placedObjects) {
+        const typeCode = OBJ_TYPE_MAP[o.type];
+        const varIdx = getVarIdx(o.variableId);
+        objBuf.push(
+            typeCode & 0xFF,
+            o.roomIndex & 0xFF,
+            (o.x|0) & 0xFF,
+            (o.y|0) & 0xFF,
+            varIdx & 0xFF,
+            0
+        );
+    }
+    if (placedObjects.length > 0) {
+        console.log('[SMS] Objects (' + placedObjects.length + '/' + MAX_OBJECTS + '):',
+            placedObjects.map(o => `${o.type}@r${o.roomIndex}(${o.x},${o.y})${o.variableId ? '/' + o.variableId : ''}`));
+    }
+
     /* ── project.inf / merging.dat ── */
     const worldCols = (gameData.world && gameData.world.cols) ? Math.max(1, gameData.world.cols) : 3;
     const worldRows = (gameData.world && gameData.world.rows) ? Math.max(1, gameData.world.rows) : 3;
     const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title),
         worldCols & 0xFF, worldRows & 0xFF];
-    const totalTN = startTileNum;
+    const totalTN = objectTileLast;
     const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
 
     /* ── Per-room sprite files ──
@@ -465,6 +821,7 @@ async function buildSMSRom() {
         { name:'main.til',    content:tileBuf },
         { name:'main.atr',    content:attrBuf },
         { name:'entities.dat',content:entBuf },
+        { name:'objects.dat', content:objBuf },
         { name:'project.inf', content:projInfo },
         { name:'merging.dat', content:combos },
         ...mapFiles,
@@ -488,7 +845,7 @@ async function buildSMSRom() {
     for (const m of roomTypeMaps) for (const k of m.keys()) allSprites.add(k);
     const nTypes = allSprites.size;
     const summary = `${kb} KB · ${liveTiles.length} tiles · ${nNpcs} NPCs` +
-        ` (${nTypes} sprite${nTypes!==1?'s':''}) · start: room ${startRoom+1} (${startX},${startY})`;
+        ` (${nTypes} sprite${nTypes!==1?'s':''}) · ${placedObjects.length} obj · start: room ${startRoom+1} (${startX},${startY})`;
 
     return { rom, filename, title, summary };
 }
