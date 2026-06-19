@@ -360,6 +360,146 @@ static void var_set(unsigned char i) {
 	if (i >= NUM_GAME_VARS) return;
 	game_vars[i >> 3] |= (unsigned char)(1 << (i & 7));
 }
+/* ── Object system ──
+   Objects (keys, doors, magic doors, player-end) are placed on the map
+   in the editor and stored in a runtime array. Each object instance
+   tracks its position, type, and state (collected/opened).
+   
+   At map-load time, apply_objects_to_map() paints object BG tiles onto
+   map_data based on the current room and each object's state.
+   
+   During movement, find_object_at() locates any object at the player's
+   target position. handle_object_at() then runs the type-specific logic
+   (collect a key, consume a key to open a door, check a variable for a
+   magic door, or set stage_clear for a player-end) and reports whether
+   the player should actually move into the cell.                  */
+
+#define MAX_OBJECTS (32)
+#define OBJ_TYPE_KEY            (0)
+#define OBJ_TYPE_DOOR           (1)
+#define OBJ_TYPE_DOOR_VARIABLE  (2)
+#define OBJ_TYPE_PLAYER_END     (3)
+#define N_OBJ_TYPES             (4)
+#define OBJECT_FLOOR_TILE       (1)   /* tile to draw after collect/open */
+#define OBJECT_STATE_DONE       (0x01)
+
+typedef struct {
+	unsigned char type;
+	unsigned char room;
+	unsigned char x;
+	unsigned char y;
+	unsigned char variable_id;
+	unsigned char state;
+} object_t;
+
+static object_t      objects[MAX_OBJECTS];
+static unsigned char object_count;
+static unsigned char player_keys;
+/* Per-type BG tile numbers; filled from the header of objects.dat.
+   The JS encoder writes these as the first N_OBJ_TYPES bytes so the
+   C side stays agnostic to the BG-tile-count + object-tile layout. */
+static unsigned char object_tile_for_type[N_OBJ_TYPES];
+
+static void load_objects(void) {
+	unsigned char i;
+	unsigned char *p;
+	resource_entry_format *e;
+
+	object_count = 0;
+	for (i = 0; i < N_OBJ_TYPES; i++) object_tile_for_type[i] = 0;
+
+	e = resource_find("objects.dat");
+	if (!e) return;
+	if (e->size < (unsigned int)(N_OBJ_TYPES + 1)) return;
+	p = (unsigned char *)resource_get_pointer(e);
+	if (!p) return;
+
+	for (i = 0; i < N_OBJ_TYPES; i++) object_tile_for_type[i] = p[i];
+	p += N_OBJ_TYPES;
+
+	object_count = *p++;
+	if (object_count > MAX_OBJECTS) object_count = MAX_OBJECTS;
+
+	for (i = 0; i < object_count; i++) {
+		objects[i].type        = *p++;
+		objects[i].room        = *p++;
+		objects[i].x           = *p++;
+		objects[i].y           = *p++;
+		objects[i].variable_id = *p++;
+		objects[i].state       = 0;
+		p++;  /* reserved flags byte */
+	}
+}
+
+/* Paint not-yet-consumed objects of the given room onto map_data.
+   Skips the player-start cell so player_find_start can still locate it
+   on the initial map setup (called after player_find_start there). */
+static void apply_objects_to_map(unsigned char room) {
+	unsigned char i, idx, tile;
+	for (i = 0; i < object_count; i++) {
+		if (objects[i].room != room) continue;
+		if (objects[i].state & OBJECT_STATE_DONE) continue;
+		if (objects[i].type >= N_OBJ_TYPES) continue;
+		if (objects[i].x >= 8 || objects[i].y >= 8) continue;
+		tile = object_tile_for_type[objects[i].type];
+		if (tile == 0) continue;
+		idx = objects[i].y * 8 + objects[i].x;
+		map_data[idx] = tile;
+	}
+}
+
+/* Returns index of an active (not collected/opened) object at the
+   given map position, or 0xFF if no object is there. */
+static unsigned char find_object_at(unsigned char room, unsigned char x, unsigned char y) {
+	unsigned char i;
+	for (i = 0; i < object_count; i++) {
+		if (objects[i].state & OBJECT_STATE_DONE) continue;
+		if (objects[i].room == room &&
+		    objects[i].x == x &&
+		    objects[i].y == y) {
+			return i;
+		}
+	}
+	return 0xFF;
+}
+
+/* Apply the type-specific effect of stepping onto an object.
+   Returns 1 if the player should move into the cell, 0 if blocked. */
+static char handle_object_at(unsigned char idx) {
+	object_t *obj = &objects[idx];
+	unsigned char map_idx = obj->y * 8 + obj->x;
+
+	switch (obj->type) {
+		case OBJ_TYPE_KEY:
+			obj->state |= OBJECT_STATE_DONE;
+			if (player_keys < 255) player_keys++;
+			map_data[map_idx] = OBJECT_FLOOR_TILE;
+			is_map_data_dirty = 1;
+			return 1;
+		case OBJ_TYPE_DOOR:
+			if (player_keys > 0) {
+				player_keys--;
+				obj->state |= OBJECT_STATE_DONE;
+				map_data[map_idx] = OBJECT_FLOOR_TILE;
+				is_map_data_dirty = 1;
+				return 1;
+			}
+			return 0;
+		case OBJ_TYPE_DOOR_VARIABLE:
+			if (obj->variable_id != VAR_NONE && var_get(obj->variable_id)) {
+				obj->state |= OBJECT_STATE_DONE;
+				map_data[map_idx] = OBJECT_FLOOR_TILE;
+				is_map_data_dirty = 1;
+				return 1;
+			}
+			return 0;
+		case OBJ_TYPE_PLAYER_END:
+			stage_clear = 1;
+			return 1;
+	}
+	return 1;
+}
+
 static void load_entities(void) {
 	unsigned char i;
 	unsigned char *p;
@@ -505,6 +645,12 @@ char gameplay_loop() {
 	
 	int map_number = 1;	
 	
+	/* Objects persist across rooms: load them once at game start and
+	   reset the key inventory. State (collected/opened) is per-object
+	   in RAM, so it survives room transitions naturally. */
+	load_objects();
+	player_keys = 0;
+	
 	while (1) {
 		initialize_graphics();
 
@@ -525,12 +671,17 @@ char gameplay_loop() {
 			map = load_map(map_number);
 		}
 		prepare_map_data(map);
-		draw_map(map);
 
 		SMS_displayOn();
 		
 		init_actor(&player, 32, 32, 2, 1, 8, 2);
+		/* player_find_start scans the pristine map_data for the PLAYER_START
+		   tile attribute. Apply objects AFTER it so an object placed at any
+		   cell does not interfere with locating the start. */
 		player_find_start(map);
+		apply_objects_to_map((unsigned char)(map_number - 1));
+		draw_map(map);
+
 		load_room_sprites((unsigned char)(map_number - 1));
 		init_npc_actors((unsigned char)(map_number - 1));
 		/* ============================================================ */
@@ -565,9 +716,18 @@ char gameplay_loop() {
 						if (_ni) {
 							show_npc_dialog_for((unsigned char)(_ni - 1));
 						} else {
-							/* Check for world edge crossing (TRS MovementManager logic) */
-							/* Use constant room size (always 8x8 in TRS) — avoids bank-mapping issues */
-							if (_tx >= 8 || _ty >= 8) {
+							/* Object interaction takes priority over both edge
+							   crossing and try_moving_actor_on_map: the player
+							   may try to step onto an in-room object even at
+							   the edge cells (x=7 / y=7), and we want the
+							   key/door/end logic to fire there instead of
+							   sending the player to the neighbour room. */
+							unsigned char _oi = find_object_at(_room, _tx, _ty);
+							if (_oi != 0xFF) {
+								if (handle_object_at(_oi)) {
+									set_actor_map_xy(&player, _tx, _ty);
+								}
+							} else if (_tx >= 8 || _ty >= 8) {
 								/* Edge crossing: compute neighbour room */
 								unsigned char cur_room = (unsigned char)(map_number - 1);
 								unsigned char cur_row  = cur_room / world_cols;
@@ -586,6 +746,7 @@ char gameplay_loop() {
 									map = load_map(map_number);
 									if (map) {
 										prepare_map_data(map);
+										apply_objects_to_map((unsigned char)(map_number - 1));
 										set_actor_map_xy(&player, wrap_x, wrap_y);
 										load_room_sprites((unsigned char)(map_number - 1));
 										init_npc_actors((unsigned char)(map_number - 1));
