@@ -630,10 +630,11 @@ async function buildSMSRom() {
     attrBuf[(startTileNum-1)*2+1] = 0x00;
 
     /* ── Object tiles ──
-       4 BG tiles appended right after the start marker for the
-       4 supported object types: key, door, door-variable, player-end.
-       The C side discovers their tile numbers from the header of
-       objects.dat — see objBuf below.
+       BG tiles appended right after the start marker, one per object
+       visual state. Most types contribute one tile; SWITCH contributes
+       two (off/on) since toggling rewrites the cell to show its state.
+       The C side learns each tile's number from the header bytes at
+       the start of objects.dat — see objBuf below.
        
        Object sprites are 8x8 matrices of *palette indices* (or null for
        transparent), while encodeBGTile expects 8x8 of *hex color strings*.
@@ -641,11 +642,19 @@ async function buildSMSRom() {
        tile) so null cells visually fall back to the floor — that way an
        object placed on grass appears as "object on grass" rather than
        "object on palette[0]". */
-    const OBJECT_TYPE_ORDER = ['key', 'door', 'door-variable', 'player-end'];
+    // Order must match OBJ_TILE_* constants in the C source.
+    const OBJECT_TILE_NAMES = [
+        'key',             // OBJ_TILE_KEY
+        'door',            // OBJ_TILE_DOOR
+        'door-variable',   // OBJ_TILE_DOOR_VARIABLE
+        'player-end',      // OBJ_TILE_PLAYER_END
+        'switch',          // OBJ_TILE_SWITCH_OFF
+        'switch--on',      // OBJ_TILE_SWITCH_ON
+    ];
     const objectTileFirst = startTileNum + 1;
     const floorPxHex = getTilePx(liveTiles[0]);
-    for (let i = 0; i < OBJECT_TYPE_ORDER.length; i++) {
-        const matrix = getObjectSprite(OBJECT_TYPE_ORDER[i]);
+    for (let i = 0; i < OBJECT_TILE_NAMES.length; i++) {
+        const matrix = getObjectSprite(OBJECT_TILE_NAMES[i]);
         const composed = matrix.map((row, r) => row.map((v, c) => {
             if (v != null) return palette[v] || palette[0];
             const fr = floorPxHex[r];
@@ -657,7 +666,7 @@ async function buildSMSRom() {
         // since interaction is intercepted in C before the SOLID check)
         while (attrBuf.length < tn * 2) attrBuf.push(0);
     }
-    const objectTileLast = objectTileFirst + OBJECT_TYPE_ORDER.length - 1;
+    const objectTileLast = objectTileFirst + OBJECT_TILE_NAMES.length - 1;
 
     /* ── Maps ── */
     setStatus('Encoding maps…', '#8af');
@@ -750,14 +759,12 @@ async function buildSMSRom() {
     }
 
     /* ── objects.dat ──
-       Header (N_OBJ_TYPES = 4 bytes): BG tile number for each object type,
-                                       in the same order as OBJ_TYPE_KEY..PLAYER_END
-                                       on the C side. The C code consults this
-                                       header so it doesn't have to know the tile
-                                       layout (which depends on number of BG tiles).
-       Byte 4:                       object_count (0..32)
-       Bytes 5..:                    per object, 6 bytes:
-                                         type      0..3 (KEY/DOOR/DOOR_VARIABLE/PLAYER_END)
+       Header (N_OBJ_TILES = 6 bytes): BG tile number for each object tile slot,
+                                       in OBJECT_TILE_NAMES order. Most types use
+                                       one slot; SWITCH uses two (off/on).
+       Byte 6:                       object_count (0..32)
+       Bytes 7..:                    per object, 6 bytes:
+                                         type      0..4 (KEY/DOOR/DOOR_VARIABLE/PLAYER_END/SWITCH)
                                          room      0..8
                                          x, y      0..7
                                          var_idx   0..31 or 0xFF
@@ -767,6 +774,7 @@ async function buildSMSRom() {
         'door':           1,
         'door-variable':  2,
         'player-end':     3,
+        'switch':         4,
     };
     const MAX_OBJECTS = 32;
     const rawObjects = Array.isArray(gameData.objects) ? gameData.objects : [];
@@ -777,8 +785,8 @@ async function buildSMSRom() {
         Number.isFinite(o.y) && o.y >= 0 && o.y < 8
     ).slice(0, MAX_OBJECTS);
     const objBuf = [];
-    // Header: tile numbers
-    for (let i = 0; i < OBJECT_TYPE_ORDER.length; i++) {
+    // Header: tile numbers, one per OBJECT_TILE_NAMES entry
+    for (let i = 0; i < OBJECT_TILE_NAMES.length; i++) {
         objBuf.push((objectTileFirst + i) & 0xFF);
     }
     // Count and instances
