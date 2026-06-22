@@ -431,6 +431,11 @@ static unsigned char player_sword_durability;
 static char          game_ended;
 static char          pending_ending;
 static char          player_end_texts[9][ENDING_TEXT_LEN];
+/* HUD: a one-line status bar at the very top of the screen showing
+   keys / lives / XP / sword. Redrawn lazily when hud_dirty is set —
+   pickups set it, and the gameplay loop draws + clears it during the
+   same VBlank window the map redraw uses. */
+static char          hud_dirty;
 
 static unsigned char sword_priority(unsigned char type) {
 	switch (type) {
@@ -584,6 +589,7 @@ static char handle_object_at(unsigned char idx) {
 			if (player_keys < 255) player_keys++;
 			map_data[map_idx] = OBJECT_FLOOR_TILE;
 			is_map_data_dirty = 1;
+			hud_dirty = 1;
 			return 1;
 		case OBJ_TYPE_DOOR:
 			if (player_keys > 0) {
@@ -591,6 +597,7 @@ static char handle_object_at(unsigned char idx) {
 				obj->state |= OBJECT_STATE_DONE;
 				map_data[map_idx] = OBJECT_FLOOR_TILE;
 				is_map_data_dirty = 1;
+				hud_dirty = 1;
 				return 1;
 			}
 			return 0;
@@ -632,6 +639,7 @@ static char handle_object_at(unsigned char idx) {
 			if (player_lives < 255) player_lives++;
 			map_data[map_idx] = OBJECT_FLOOR_TILE;
 			is_map_data_dirty = 1;
+			hud_dirty = 1;
 			return 1;
 		case OBJ_TYPE_XP_SCROLL:
 			/* Collectible: pick up, increment XP, allow move. */
@@ -639,6 +647,7 @@ static char handle_object_at(unsigned char idx) {
 			if (player_xp < 255) player_xp++;
 			map_data[map_idx] = OBJECT_FLOOR_TILE;
 			is_map_data_dirty = 1;
+			hud_dirty = 1;
 			return 1;
 		case OBJ_TYPE_SWORD:
 		case OBJ_TYPE_SWORD_BRONZE:
@@ -654,6 +663,7 @@ static char handle_object_at(unsigned char idx) {
 				player_sword_durability = sword_durability_for(obj->type);
 				map_data[map_idx] = OBJECT_FLOOR_TILE;
 				is_map_data_dirty = 1;
+				hud_dirty = 1;
 			}
 			return 1;
 		}
@@ -715,6 +725,29 @@ static void load_entities(void) {
 		npc_data[i].cond_reward_var = base[4 + 2 * NPC_DIALOG_LEN + 2];
 		npc_actors[i].active = 0;
 	}
+}
+
+static void draw_hud(void) {
+	char buf[24];
+	unsigned char i;
+	const char *sword_name;
+	/* Clear row 0 */
+	for (i = 0; i < 32; i++) SMS_setTileatXY(i, 0, 0);
+	/* Counters, left-aligned */
+	SMS_setNextTileatXY(0, 0);
+	sprintf(buf, "K:%d L:%d X:%d",
+		(int)player_keys, (int)player_lives, (int)player_xp);
+	puts(buf);
+	/* Sword status, right-aligned */
+	switch (player_sword_type) {
+		case OBJ_TYPE_SWORD_WOOD:   sword_name = "Sw:Wd"; break;
+		case OBJ_TYPE_SWORD_BRONZE: sword_name = "Sw:Br"; break;
+		case OBJ_TYPE_SWORD:        sword_name = "Sw:Fe"; break;
+		default:                    sword_name = "Sw:- "; break;
+	}
+	SMS_setNextTileatXY(32 - 5, 0);
+	puts(sword_name);
+	hud_dirty = 0;
 }
 
 static void show_npc_dialog(char *text) {
@@ -823,9 +856,13 @@ char gameplay_loop() {
 	player_sword_durability = 0;
 	game_ended              = 0;
 	pending_ending          = 0;
+	hud_dirty               = 1;
 	
 	while (1) {
 		initialize_graphics();
+		/* initialize_graphics wipes VRAM, so the HUD also needs redrawing
+		   on every map setup (start of game + stage_clear-driven advance). */
+		hud_dirty = 1;
 
 		load_entities();
 		{
@@ -956,6 +993,7 @@ char gameplay_loop() {
 				if (cur_map) draw_map(cur_map);
 				is_map_data_dirty = 0;
 			}
+			if (hud_dirty) draw_hud();
 			
 			joy_prev = joy;
 			joy = SMS_getKeysStatus();
