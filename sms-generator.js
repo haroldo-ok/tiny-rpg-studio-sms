@@ -650,6 +650,8 @@ async function buildSMSRom() {
         'player-end',      // OBJ_TILE_PLAYER_END
         'switch',          // OBJ_TILE_SWITCH_OFF
         'switch--on',      // OBJ_TILE_SWITCH_ON
+        'life-potion',     // OBJ_TILE_LIFE_POTION
+        'xp-scroll',       // OBJ_TILE_XP_SCROLL
     ];
     const objectTileFirst = startTileNum + 1;
     const floorPxHex = getTilePx(liveTiles[0]);
@@ -759,12 +761,13 @@ async function buildSMSRom() {
     }
 
     /* ── objects.dat ──
-       Header (N_OBJ_TILES = 6 bytes): BG tile number for each object tile slot,
+       Header (N_OBJ_TILES = 8 bytes): BG tile number for each object tile slot,
                                        in OBJECT_TILE_NAMES order. Most types use
                                        one slot; SWITCH uses two (off/on).
-       Byte 6:                       object_count (0..32)
-       Bytes 7..:                    per object, 6 bytes:
-                                         type      0..4 (KEY/DOOR/DOOR_VARIABLE/PLAYER_END/SWITCH)
+       Byte 8:                       object_count (0..32)
+       Bytes 9..:                    per object, 6 bytes:
+                                         type      0..6 (KEY/DOOR/DOOR_VARIABLE/PLAYER_END/
+                                                         SWITCH/LIFE_POTION/XP_SCROLL)
                                          room      0..8
                                          x, y      0..7
                                          var_idx   0..31 or 0xFF
@@ -775,6 +778,8 @@ async function buildSMSRom() {
         'door-variable':  2,
         'player-end':     3,
         'switch':         4,
+        'life-potion':    5,
+        'xp-scroll':      6,
     };
     const MAX_OBJECTS = 32;
     const rawObjects = Array.isArray(gameData.objects) ? gameData.objects : [];
