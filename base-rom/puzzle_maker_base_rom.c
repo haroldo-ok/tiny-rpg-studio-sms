@@ -387,11 +387,12 @@ static void var_clear(unsigned char i) {
 #define OBJ_TYPE_SWITCH         (4)
 #define OBJ_TYPE_LIFE_POTION    (5)
 #define OBJ_TYPE_XP_SCROLL      (6)
-#define N_OBJ_TYPES             (7)
-/* TILE indices in the objects.dat header. For most types index == type,
-   except SWITCH which contributes two tile slots (off + on visual).
-   The two switch slots sit between PLAYER_END and the rest, so the
-   one-tile-per-type entries that follow shift by one. */
+#define OBJ_TYPE_SWORD          (7)
+#define OBJ_TYPE_SWORD_BRONZE   (8)
+#define OBJ_TYPE_SWORD_WOOD     (9)
+#define N_OBJ_TYPES             (10)
+/* TILE indices in the objects.dat header. SWITCH contributes two slots
+   (off + on visual); the other entries are 1:1 with their type code. */
 #define OBJ_TILE_KEY            (0)
 #define OBJ_TILE_DOOR           (1)
 #define OBJ_TILE_DOOR_VARIABLE  (2)
@@ -400,10 +401,14 @@ static void var_clear(unsigned char i) {
 #define OBJ_TILE_SWITCH_ON      (5)
 #define OBJ_TILE_LIFE_POTION    (6)
 #define OBJ_TILE_XP_SCROLL      (7)
-#define N_OBJ_TILES             (8)
+#define OBJ_TILE_SWORD          (8)
+#define OBJ_TILE_SWORD_BRONZE   (9)
+#define OBJ_TILE_SWORD_WOOD     (10)
+#define N_OBJ_TILES             (11)
 #define OBJECT_FLOOR_TILE       (1)   /* tile to draw after collect/open */
 #define OBJECT_STATE_DONE       (0x01)
 #define OBJECT_STATE_ON         (0x02)
+#define ENDING_TEXT_LEN         (36)  /* matches NPC_DIALOG_LEN */
 
 typedef struct {
 	unsigned char type;
@@ -419,6 +424,58 @@ static unsigned char object_count;
 static unsigned char player_keys;
 static unsigned char player_lives;
 static unsigned char player_xp;
+static unsigned char player_sword_type;       /* 0 = none */
+static unsigned char player_sword_durability;
+/* Game-ending state. PLAYER_END objects show a per-room ending text
+   in the dialog row, then end the game when the dialog closes. */
+static char          game_ended;
+static char          pending_ending;
+static char          player_end_texts[9][ENDING_TEXT_LEN];
+
+static unsigned char sword_priority(unsigned char type) {
+	switch (type) {
+		case OBJ_TYPE_SWORD_WOOD:   return 1;
+		case OBJ_TYPE_SWORD_BRONZE: return 2;
+		case OBJ_TYPE_SWORD:        return 3;
+		default:                    return 0;
+	}
+}
+
+static unsigned char sword_durability_for(unsigned char type) {
+	switch (type) {
+		case OBJ_TYPE_SWORD_WOOD:   return 2;
+		case OBJ_TYPE_SWORD_BRONZE: return 3;
+		case OBJ_TYPE_SWORD:        return 5;
+		default:                    return 0;
+	}
+}
+
+/* Forward declaration: handle_object_at (defined upstream) shows the
+   per-room ending text via this function when PLAYER_END fires. */
+static void show_npc_dialog(char *text);
+
+static void load_endings(void) {
+	unsigned char *p;
+	resource_entry_format *e;
+	unsigned char r, i;
+
+	for (r = 0; r < 9; r++) {
+		for (i = 0; i < ENDING_TEXT_LEN; i++) player_end_texts[r][i] = 0;
+	}
+
+	e = resource_find("endings.dat");
+	if (!e) return;
+	if (e->size < (unsigned int)(9 * ENDING_TEXT_LEN)) return;
+	p = (unsigned char *)resource_get_pointer(e);
+	if (!p) return;
+
+	for (r = 0; r < 9; r++) {
+		for (i = 0; i < ENDING_TEXT_LEN; i++) {
+			player_end_texts[r][i] = (char)p[r * ENDING_TEXT_LEN + i];
+		}
+		player_end_texts[r][ENDING_TEXT_LEN - 1] = 0;
+	}
+}
 /* Per-type BG tile numbers; filled from the header of objects.dat.
    The JS encoder writes these as the first N_OBJ_TILES bytes so the
    C side stays agnostic to the BG-tile-count + object-tile layout.
@@ -479,6 +536,15 @@ static void apply_objects_to_map(unsigned char room) {
 			case OBJ_TYPE_XP_SCROLL:
 				tile_index = OBJ_TILE_XP_SCROLL;
 				break;
+			case OBJ_TYPE_SWORD:
+				tile_index = OBJ_TILE_SWORD;
+				break;
+			case OBJ_TYPE_SWORD_BRONZE:
+				tile_index = OBJ_TILE_SWORD_BRONZE;
+				break;
+			case OBJ_TYPE_SWORD_WOOD:
+				tile_index = OBJ_TILE_SWORD_WOOD;
+				break;
 			default:
 				/* KEY/DOOR/DOOR_VARIABLE/PLAYER_END: tile index == type */
 				tile_index = objects[i].type;
@@ -537,7 +603,15 @@ static char handle_object_at(unsigned char idx) {
 			}
 			return 0;
 		case OBJ_TYPE_PLAYER_END:
-			stage_clear = 1;
+			/* End the game. If a per-room ending text exists, show it
+			   in the dialog row and end after the dialog closes; else
+			   end immediately. */
+			if (obj->room < 9 && player_end_texts[obj->room][0]) {
+				show_npc_dialog(player_end_texts[obj->room]);
+				pending_ending = 1;
+			} else {
+				game_ended = 1;
+			}
 			return 1;
 		case OBJ_TYPE_SWITCH:
 			/* Toggle the OBJECT_STATE_ON bit and the linked variable.
@@ -566,6 +640,23 @@ static char handle_object_at(unsigned char idx) {
 			map_data[map_idx] = OBJECT_FLOOR_TILE;
 			is_map_data_dirty = 1;
 			return 1;
+		case OBJ_TYPE_SWORD:
+		case OBJ_TYPE_SWORD_BRONZE:
+		case OBJ_TYPE_SWORD_WOOD: {
+			/* Only pick up a sword that's better than the current one
+			   (priority: wood < bronze < sword). Worse swords are left
+			   on the map, but the player can still walk onto them. */
+			unsigned char new_pri = sword_priority(obj->type);
+			unsigned char cur_pri = sword_priority(player_sword_type);
+			if (new_pri > cur_pri) {
+				obj->state |= OBJECT_STATE_DONE;
+				player_sword_type       = obj->type;
+				player_sword_durability = sword_durability_for(obj->type);
+				map_data[map_idx] = OBJECT_FLOOR_TILE;
+				is_map_data_dirty = 1;
+			}
+			return 1;
+		}
 	}
 	return 1;
 }
@@ -657,6 +748,11 @@ static void close_npc_dialog(void) {
 		var_set(pending_reward_var);
 		pending_reward_var = VAR_NONE;
 	}
+	/* If this was an end-game dialog, finalize the ending now. */
+	if (pending_ending) {
+		game_ended = 1;
+		pending_ending = 0;
+	}
 	dialog_active = 0;
 }
 
@@ -719,9 +815,14 @@ char gameplay_loop() {
 	   reset the key inventory. State (collected/opened) is per-object
 	   in RAM, so it survives room transitions naturally. */
 	load_objects();
-	player_keys  = 0;
-	player_lives = 0;
-	player_xp    = 0;
+	load_endings();
+	player_keys             = 0;
+	player_lives            = 0;
+	player_xp               = 0;
+	player_sword_type       = 0;
+	player_sword_durability = 0;
+	game_ended              = 0;
+	pending_ending          = 0;
 	
 	while (1) {
 		initialize_graphics();
@@ -858,7 +959,9 @@ char gameplay_loop() {
 			
 			joy_prev = joy;
 			joy = SMS_getKeysStatus();
-		} while (!stage_clear);
+		} while (!stage_clear && !game_ended);
+		
+		if (game_ended) break;
 		
 		map_number++;
 
@@ -869,6 +972,19 @@ char gameplay_loop() {
 }
 
 char handle_gameover() {
+	initialize_graphics();
+
+	SMS_setNextTileatXY(12, 11);
+	puts("THE END");
+
+	SMS_setNextTileatXY(7, 14);
+	puts("Press any button");
+
+	SMS_displayOn();
+
+	wait_button_press();
+	wait_button_release();
+
 	return STATE_START;
 }
 

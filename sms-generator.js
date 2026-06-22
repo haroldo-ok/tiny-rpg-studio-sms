@@ -652,6 +652,9 @@ async function buildSMSRom() {
         'switch--on',      // OBJ_TILE_SWITCH_ON
         'life-potion',     // OBJ_TILE_LIFE_POTION
         'xp-scroll',       // OBJ_TILE_XP_SCROLL
+        'sword',           // OBJ_TILE_SWORD
+        'sword-bronze',    // OBJ_TILE_SWORD_BRONZE
+        'sword-wood',      // OBJ_TILE_SWORD_WOOD
     ];
     const objectTileFirst = startTileNum + 1;
     const floorPxHex = getTilePx(liveTiles[0]);
@@ -761,13 +764,14 @@ async function buildSMSRom() {
     }
 
     /* ── objects.dat ──
-       Header (N_OBJ_TILES = 8 bytes): BG tile number for each object tile slot,
+       Header (N_OBJ_TILES = 11 bytes): BG tile number for each object tile slot,
                                        in OBJECT_TILE_NAMES order. Most types use
                                        one slot; SWITCH uses two (off/on).
-       Byte 8:                       object_count (0..32)
-       Bytes 9..:                    per object, 6 bytes:
-                                         type      0..6 (KEY/DOOR/DOOR_VARIABLE/PLAYER_END/
-                                                         SWITCH/LIFE_POTION/XP_SCROLL)
+       Byte 11:                      object_count (0..32)
+       Bytes 12..:                   per object, 6 bytes:
+                                         type      0..9 (KEY/DOOR/DOOR_VARIABLE/PLAYER_END/
+                                                         SWITCH/LIFE_POTION/XP_SCROLL/
+                                                         SWORD/SWORD_BRONZE/SWORD_WOOD)
                                          room      0..8
                                          x, y      0..7
                                          var_idx   0..31 or 0xFF
@@ -780,6 +784,9 @@ async function buildSMSRom() {
         'switch':         4,
         'life-potion':    5,
         'xp-scroll':      6,
+        'sword':          7,
+        'sword-bronze':   8,
+        'sword-wood':     9,
     };
     const MAX_OBJECTS = 32;
     const rawObjects = Array.isArray(gameData.objects) ? gameData.objects : [];
@@ -811,6 +818,24 @@ async function buildSMSRom() {
     if (placedObjects.length > 0) {
         console.log('[SMS] Objects (' + placedObjects.length + '/' + MAX_OBJECTS + '):',
             placedObjects.map(o => `${o.type}@r${o.roomIndex}(${o.x},${o.y})${o.variableId ? '/' + o.variableId : ''}`));
+    }
+
+    /* ── endings.dat ──
+       9 fixed-length slots (one per room), 36 bytes each, total 324 bytes.
+       Each slot is the endingText from that room's player-end object (if any),
+       null-padded. The C side reads this in load_endings(); handle_object_at
+       shows the matching text in the dialog row when PLAYER_END fires. */
+    const ENDING_TEXT_LEN = 36;
+    const endingsBuf = [];
+    for (let r = 0; r < ROOM_COUNT; r++) {
+        const pe = rawObjects.find(o => o && o.type === 'player-end' &&
+                                          o.roomIndex === r &&
+                                          typeof o.endingText === 'string' &&
+                                          o.endingText.length > 0);
+        const txt = pe ? String(pe.endingText).slice(0, ENDING_TEXT_LEN - 1) : '';
+        for (let i = 0; i < ENDING_TEXT_LEN; i++) {
+            endingsBuf.push(i < txt.length ? (txt.charCodeAt(i) & 0xFF) : 0);
+        }
     }
 
     /* ── project.inf / merging.dat ── */
@@ -848,6 +873,7 @@ async function buildSMSRom() {
         { name:'main.atr',    content:attrBuf },
         { name:'entities.dat',content:entBuf },
         { name:'objects.dat', content:objBuf },
+        { name:'endings.dat', content:endingsBuf },
         { name:'project.inf', content:projInfo },
         { name:'merging.dat', content:combos },
         ...mapFiles,
