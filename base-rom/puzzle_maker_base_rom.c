@@ -385,16 +385,22 @@ static void var_clear(unsigned char i) {
 #define OBJ_TYPE_DOOR_VARIABLE  (2)
 #define OBJ_TYPE_PLAYER_END     (3)
 #define OBJ_TYPE_SWITCH         (4)
-#define N_OBJ_TYPES             (5)
+#define OBJ_TYPE_LIFE_POTION    (5)
+#define OBJ_TYPE_XP_SCROLL      (6)
+#define N_OBJ_TYPES             (7)
 /* TILE indices in the objects.dat header. For most types index == type,
-   except SWITCH which contributes two tile slots (off + on visual). */
+   except SWITCH which contributes two tile slots (off + on visual).
+   The two switch slots sit between PLAYER_END and the rest, so the
+   one-tile-per-type entries that follow shift by one. */
 #define OBJ_TILE_KEY            (0)
 #define OBJ_TILE_DOOR           (1)
 #define OBJ_TILE_DOOR_VARIABLE  (2)
 #define OBJ_TILE_PLAYER_END     (3)
 #define OBJ_TILE_SWITCH_OFF     (4)
 #define OBJ_TILE_SWITCH_ON      (5)
-#define N_OBJ_TILES             (6)
+#define OBJ_TILE_LIFE_POTION    (6)
+#define OBJ_TILE_XP_SCROLL      (7)
+#define N_OBJ_TILES             (8)
 #define OBJECT_FLOOR_TILE       (1)   /* tile to draw after collect/open */
 #define OBJECT_STATE_DONE       (0x01)
 #define OBJECT_STATE_ON         (0x02)
@@ -411,6 +417,8 @@ typedef struct {
 static object_t      objects[MAX_OBJECTS];
 static unsigned char object_count;
 static unsigned char player_keys;
+static unsigned char player_lives;
+static unsigned char player_xp;
 /* Per-type BG tile numbers; filled from the header of objects.dat.
    The JS encoder writes these as the first N_OBJ_TILES bytes so the
    C side stays agnostic to the BG-tile-count + object-tile layout.
@@ -451,7 +459,8 @@ static void load_objects(void) {
 /* Paint not-yet-consumed objects of the given room onto map_data.
    Skips the player-start cell so player_find_start can still locate it
    on the initial map setup (called after player_find_start there).
-   For switches, picks the OFF or ON tile based on the OBJECT_STATE_ON bit. */
+   For switches, picks the OFF or ON tile based on the OBJECT_STATE_ON bit.
+   Types after SWITCH (which uses two tile slots) shift up by one. */
 static void apply_objects_to_map(unsigned char room) {
 	unsigned char i, idx, tile_index, tile;
 	for (i = 0; i < object_count; i++) {
@@ -459,11 +468,21 @@ static void apply_objects_to_map(unsigned char room) {
 		if (objects[i].state & OBJECT_STATE_DONE) continue;
 		if (objects[i].type >= N_OBJ_TYPES) continue;
 		if (objects[i].x >= 8 || objects[i].y >= 8) continue;
-		if (objects[i].type == OBJ_TYPE_SWITCH) {
-			tile_index = (objects[i].state & OBJECT_STATE_ON)
-				? OBJ_TILE_SWITCH_ON : OBJ_TILE_SWITCH_OFF;
-		} else {
-			tile_index = objects[i].type;
+		switch (objects[i].type) {
+			case OBJ_TYPE_SWITCH:
+				tile_index = (objects[i].state & OBJECT_STATE_ON)
+					? OBJ_TILE_SWITCH_ON : OBJ_TILE_SWITCH_OFF;
+				break;
+			case OBJ_TYPE_LIFE_POTION:
+				tile_index = OBJ_TILE_LIFE_POTION;
+				break;
+			case OBJ_TYPE_XP_SCROLL:
+				tile_index = OBJ_TILE_XP_SCROLL;
+				break;
+			default:
+				/* KEY/DOOR/DOOR_VARIABLE/PLAYER_END: tile index == type */
+				tile_index = objects[i].type;
+				break;
 		}
 		tile = object_tile_for_type[tile_index];
 		if (tile == 0) continue;
@@ -531,6 +550,20 @@ static char handle_object_at(unsigned char idx) {
 				map_data[map_idx] = object_tile_for_type[OBJ_TILE_SWITCH_OFF];
 				if (obj->variable_id != VAR_NONE) var_clear(obj->variable_id);
 			}
+			is_map_data_dirty = 1;
+			return 1;
+		case OBJ_TYPE_LIFE_POTION:
+			/* Collectible: pick up, increment lives, allow move. */
+			obj->state |= OBJECT_STATE_DONE;
+			if (player_lives < 255) player_lives++;
+			map_data[map_idx] = OBJECT_FLOOR_TILE;
+			is_map_data_dirty = 1;
+			return 1;
+		case OBJ_TYPE_XP_SCROLL:
+			/* Collectible: pick up, increment XP, allow move. */
+			obj->state |= OBJECT_STATE_DONE;
+			if (player_xp < 255) player_xp++;
+			map_data[map_idx] = OBJECT_FLOOR_TILE;
 			is_map_data_dirty = 1;
 			return 1;
 	}
@@ -686,7 +719,9 @@ char gameplay_loop() {
 	   reset the key inventory. State (collected/opened) is per-object
 	   in RAM, so it survives room transitions naturally. */
 	load_objects();
-	player_keys = 0;
+	player_keys  = 0;
+	player_lives = 0;
+	player_xp    = 0;
 	
 	while (1) {
 		initialize_graphics();
