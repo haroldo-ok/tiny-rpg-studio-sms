@@ -416,20 +416,29 @@ static void var_clear(unsigned char i) {
    xp-reward values; per-instance state tracks current HP and whether
    the enemy is dead. Walking onto an enemy resolves one round of combat
    (player and enemy each deal damage simultaneously). If the enemy dies,
-   its tile clears to floor and the player gains XP and moves into the
-   cell. If the player dies, the game ends. */
-#define MAX_ENEMIES             (32)
-#define N_ENEMY_TYPES           (8)
-#define ENEMY_TYPE_GIANT_RAT    (0)
-#define ENEMY_TYPE_BANDIT       (1)
-#define ENEMY_TYPE_SKELETON     (2)
-#define ENEMY_TYPE_DARK_KNIGHT  (3)
-#define ENEMY_TYPE_NECROMANCER  (4)
-#define ENEMY_TYPE_DRAGON       (5)
-#define ENEMY_TYPE_FALLEN_KING  (6)
-#define ENEMY_TYPE_ANCIENT_DEMON (7)
-#define ENEMY_STATE_DEAD        (0x01)
-#define PLAYER_STARTING_LIVES   (3)
+   it stops being drawn and the player gains XP and moves into the cell.
+   If the player dies, the game ends.
+
+   Enemies render as hardware sprites, sharing the per-room sprite VRAM
+   region with NPCs: NPC slots occupy VRAM tiles 24..151 (8 types × 16
+   sub-tiles), and enemy slots occupy tiles 152..215 (4 types × 16).
+   Per-room there are up to 8 distinct NPC types and up to 4 distinct
+   enemy types. The JS encoder writes the enemy's per-room slot index
+   (0..3) into the data file. */
+#define MAX_ENEMIES               (32)
+#define N_ENEMY_TYPES             (8)
+#define MAX_ENEMY_SPRITE_TYPES    (4)
+#define ENEMY_BASE_TILE(s)        ((unsigned char)(24 + 16 * 8 + (unsigned char)(s) * 16))
+#define ENEMY_TYPE_GIANT_RAT      (0)
+#define ENEMY_TYPE_BANDIT         (1)
+#define ENEMY_TYPE_SKELETON       (2)
+#define ENEMY_TYPE_DARK_KNIGHT    (3)
+#define ENEMY_TYPE_NECROMANCER    (4)
+#define ENEMY_TYPE_DRAGON         (5)
+#define ENEMY_TYPE_FALLEN_KING    (6)
+#define ENEMY_TYPE_ANCIENT_DEMON  (7)
+#define ENEMY_STATE_DEAD          (0x01)
+#define PLAYER_STARTING_LIVES     (3)
 
 typedef struct {
 	unsigned char type;
@@ -522,15 +531,14 @@ typedef struct {
 	unsigned char room;
 	unsigned char x;
 	unsigned char y;
-	unsigned char lives;   /* current HP, 0 = dead */
-	unsigned char state;   /* bit 0 = ENEMY_STATE_DEAD */
+	unsigned char sprite_slot;  /* 0..MAX_ENEMY_SPRITE_TYPES-1; per-room */
+	unsigned char lives;        /* current HP, 0 = dead */
+	unsigned char state;        /* bit 0 = ENEMY_STATE_DEAD */
 } enemy_t;
 
 static enemy_t       enemy_data[MAX_ENEMIES];
+static actor         enemy_actors[MAX_ENEMIES];
 static unsigned char enemy_count;
-/* BG tile number for each enemy type, written by the JS encoder as the
-   first N_ENEMY_TYPES bytes of enemies.dat. */
-static unsigned char enemy_tile_for_type[N_ENEMY_TYPES];
 
 /* Per-type starting lives / damage / xp reward, mirrors TRS
    EnemyDefinitions (giant-rat..ancient-demon). */
@@ -556,42 +564,46 @@ static void load_enemies(void) {
 	resource_entry_format *e;
 
 	enemy_count = 0;
-	for (i = 0; i < N_ENEMY_TYPES; i++) enemy_tile_for_type[i] = 0;
 
 	e = resource_find("enemies.dat");
 	if (!e) return;
-	if (e->size < (unsigned int)(N_ENEMY_TYPES + 1)) return;
+	if (e->size == 0) return;
 	p = (unsigned char *)resource_get_pointer(e);
 	if (!p) return;
-
-	for (i = 0; i < N_ENEMY_TYPES; i++) enemy_tile_for_type[i] = p[i];
-	p += N_ENEMY_TYPES;
 
 	enemy_count = *p++;
 	if (enemy_count > MAX_ENEMIES) enemy_count = MAX_ENEMIES;
 
 	for (i = 0; i < enemy_count; i++) {
-		enemy_data[i].type  = *p++;
-		enemy_data[i].room  = *p++;
-		enemy_data[i].x     = *p++;
-		enemy_data[i].y     = *p++;
-		enemy_data[i].lives = enemy_max_lives(enemy_data[i].type);
-		enemy_data[i].state = 0;
+		enemy_data[i].type        = *p++;
+		enemy_data[i].room        = *p++;
+		enemy_data[i].x           = *p++;
+		enemy_data[i].y           = *p++;
+		enemy_data[i].sprite_slot = *p++;
+		enemy_data[i].lives       = enemy_max_lives(enemy_data[i].type);
+		enemy_data[i].state       = 0;
+		if (enemy_data[i].sprite_slot >= MAX_ENEMY_SPRITE_TYPES)
+			enemy_data[i].sprite_slot = 0;
 	}
 }
 
-/* Paint not-yet-dead enemies of the given room onto map_data. */
-static void apply_enemies_to_map(unsigned char room) {
-	unsigned char i, idx, tile;
+/* Initialize the actor records for all enemies in the given room.
+   Enemies in other rooms (or dead ones) get active = 0 so draw_actor
+   is a no-op for them. */
+static void init_enemy_actors(unsigned char room_idx) {
+	unsigned char i;
 	for (i = 0; i < enemy_count; i++) {
-		if (enemy_data[i].room != room) continue;
-		if (enemy_data[i].state & ENEMY_STATE_DEAD) continue;
-		if (enemy_data[i].type >= N_ENEMY_TYPES) continue;
-		if (enemy_data[i].x >= 8 || enemy_data[i].y >= 8) continue;
-		tile = enemy_tile_for_type[enemy_data[i].type];
-		if (tile == 0) continue;
-		idx = enemy_data[i].y * 8 + enemy_data[i].x;
-		map_data[idx] = tile;
+		if (enemy_data[i].room != room_idx ||
+		    (enemy_data[i].state & ENEMY_STATE_DEAD)) {
+			enemy_actors[i].active = 0;
+			continue;
+		}
+		init_actor(&enemy_actors[i],
+			enemy_data[i].x << 4,
+			(enemy_data[i].y << 4) + (MAP_SCREEN_Y << 3),
+			2, 1,
+			ENEMY_BASE_TILE(enemy_data[i].sprite_slot),
+			2);
 	}
 }
 
@@ -622,16 +634,16 @@ static char handle_enemy_combat(unsigned char idx) {
 
 	/* Player → enemy */
 	if (pdamage >= e->lives) {
-		/* Enemy defeated */
+		/* Enemy defeated — flag DEAD and disable the actor so the next
+		   frame's render skips it. The BG tile under the enemy stays
+		   whatever the user placed; no map_data modification needed. */
 		e->state |= ENEMY_STATE_DEAD;
 		e->lives = 0;
-		map_data[e->y * 8 + e->x] = OBJECT_FLOOR_TILE;
-		is_map_data_dirty = 1;
+		enemy_actors[idx].active = 0;
 		if (player_xp + enemy_xp(e->type) < 255)
 			player_xp += enemy_xp(e->type);
 		else
 			player_xp = 255;
-		/* Sword chips when it kills */
 		if (player_sword_durability > 0) {
 			player_sword_durability--;
 			if (player_sword_durability == 0) player_sword_type = 0;
@@ -1069,11 +1081,11 @@ char gameplay_loop() {
 		   cell does not interfere with locating the start. */
 		player_find_start(map);
 		apply_objects_to_map((unsigned char)(map_number - 1));
-		apply_enemies_to_map((unsigned char)(map_number - 1));
 		draw_map(map);
 
 		load_room_sprites((unsigned char)(map_number - 1));
 		init_npc_actors((unsigned char)(map_number - 1));
+		init_enemy_actors((unsigned char)(map_number - 1));
 		/* ============================================================ */
 
 		stage_clear = 0;
@@ -1147,10 +1159,10 @@ char gameplay_loop() {
 									if (map) {
 										prepare_map_data(map);
 										apply_objects_to_map((unsigned char)(map_number - 1));
-										apply_enemies_to_map((unsigned char)(map_number - 1));
 										set_actor_map_xy(&player, wrap_x, wrap_y);
 										load_room_sprites((unsigned char)(map_number - 1));
 										init_npc_actors((unsigned char)(map_number - 1));
+										init_enemy_actors((unsigned char)(map_number - 1));
 										is_map_data_dirty = 1;
 									}
 								}
@@ -1173,6 +1185,11 @@ char gameplay_loop() {
 				for (_i = 0; _i < npc_count; _i++) {
 					if (npc_data[_i].room == (unsigned char)(map_number - 1))
 						draw_actor(&npc_actors[_i]);
+				}
+				for (_i = 0; _i < enemy_count; _i++) {
+					if (enemy_data[_i].room == (unsigned char)(map_number - 1) &&
+					    !(enemy_data[_i].state & ENEMY_STATE_DEAD))
+						draw_actor(&enemy_actors[_i]);
 				}
 			}
 			SMS_finalizeSprites();	
