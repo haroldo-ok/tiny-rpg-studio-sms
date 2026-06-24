@@ -463,6 +463,104 @@ function getObjectSprite(name) {
 }
 
 
+
+// Enemy sprite matrices (8x8 palette indices), extracted from TRS EnemySprites.ts
+const ENEMY_SPRITES = {
+    default: [
+        [ null, null,  6, null, null, null,  6, null ],
+        [ null, null,  6,  6,  6,  6,  6, null ],
+        [ null, null,  6,  6,  8,  6,  8, null ],
+        [ null, null,  6,  6,  6,  6,  6, null ],
+        [ null, null,  1,  1,  6,  1,  1, null ],
+        [ null, null,  6,  1,  1,  1,  6, null ],
+        [ null, null, null,  1,  1,  1, null, null ],
+        [ null, null, null,  6, null,  6, null, null ]
+    ],
+    'giant-rat': [
+        [ null,  1, 15, 15,  1, 15, 15,  1 ],
+        [ null,  1, 15, 15,  1, 15, 15,  1 ],
+        [  1, 15, 13, 13, 13, 13, 13,  1 ],
+        [  1, 15, 13,  8, 13,  8, 13,  1 ],
+        [  1, 15,  5, 13, 13, 13,  1, null ],
+        [  1,  5,  5,  5, 15,  1, null, null ],
+        [  1,  5,  5,  5,  5,  1, null, null ],
+        [  1, 15,  1,  1, 15,  1, null, null ]
+    ],
+    'bandit': [
+        [ null,  1,  1,  1,  1,  1,  6,  1 ],
+        [  1, 15, 15, 15, 15,  1,  7,  1 ],
+        [  1, 15,  8, 15,  8,  1,  7,  1 ],
+        [  1,  4,  4,  4,  4,  5,  6,  1 ],
+        [  1,  5,  4,  4,  4,  2,  2,  2 ],
+        [  1,  5,  5,  4,  5,  1,  4,  1 ],
+        [  1, 13, 13, 13, 13,  1,  1, null ],
+        [  1, 13,  1,  1, 13,  1, null, null ]
+    ],
+    'dark-knight': [
+        [ null,  1,  1,  1,  1, null,  1, null ],
+        [  1,  5,  5,  5,  5,  1,  2,  1 ],
+        [  1,  5,  8,  5,  8,  1,  2,  1 ],
+        [  1,  5, 13,  5, 13,  5,  2,  1 ],
+        [  1, 13,  5, 13,  5, 14, 14,  1 ],
+        [  1,  5, 13,  5, 13,  1,  5,  1 ],
+        [  1,  5,  5, 13,  5,  1,  1, null ],
+        [  1,  5,  1,  1,  5,  1, null, null ]
+    ],
+    'necromancer': [
+        [ null,  1,  1,  1,  1, null,  1, null ],
+        [  1, 15, 15, 15, 15,  1,  8,  1 ],
+        [  1, 15,  8, 15,  8,  1,  4,  1 ],
+        [  1, 15, 15, 15, 15,  1,  4,  1 ],
+        [  1,  2,  2,  2,  2,  2,  2,  1 ],
+        [  1,  2,  2,  2,  2,  2,  4,  1 ],
+        [  1,  2,  2,  2,  2,  1,  4,  1 ],
+        [  1,  2,  2,  2,  2,  2,  4,  1 ]
+    ],
+    'dragon': [
+        [ null,  1,  1,  1,  1,  1,  1, null ],
+        [  1,  3, 11, 11, 11, 11, 11,  1 ],
+        [  1, 11, 11, 11,  8, 11,  8,  1 ],
+        [  1,  3,  3, 11, 11, 11, 11,  1 ],
+        [  1, 11,  3, 11,  7,  1,  7,  1 ],
+        [  1, 11, 11, 11, 11,  3,  1, null ],
+        [  1,  3,  3,  3,  1,  3,  1, null ],
+        [  1, 11,  1, 11,  1,  1, null, null ]
+    ],
+    'skeleton': [
+        [ null,  1,  7,  7,  7,  7,  1, null ],
+        [ null,  1,  7,  8,  7,  8,  1, null ],
+        [ null,  1,  7,  7,  7,  7,  1, null ],
+        [  1,  7,  1,  7,  7,  1,  7,  1 ],
+        [  1,  7,  7,  7,  7,  7,  7,  1 ],
+        [  1,  7,  1,  7,  1,  1,  7,  1 ],
+        [ null,  1,  7,  7,  7,  7,  1, null ],
+        [ null,  1,  7,  1,  1,  7,  1, null ]
+    ],
+    'fallen-king': [
+        [  1, 10,  1, 10,  1, 10,  1,  1 ],
+        [  1,  9,  9,  9,  9,  9,  1, 10 ],
+        [  1,  5, 15,  8, 15,  8,  1,  9 ],
+        [  1,  5,  5, 15, 15,  5,  1,  9 ],
+        [  1,  2,  7,  5,  5,  7,  1,  9 ],
+        [  1,  2,  2,  7,  2,  2,  2, 15 ],
+        [  1,  2,  2,  7,  2,  2,  1,  9 ],
+        [  1,  7,  7,  7,  7,  7,  1,  9 ]
+    ],
+    'ancient-demon': [
+        [ null,  1,  8,  1,  1,  8,  1, null ],
+        [ null,  1,  8,  8,  8,  8,  1, null ],
+        [ null,  1,  8,  0,  8,  0,  1, null ],
+        [  1,  8,  8,  8,  8,  8,  8,  1 ],
+        [  8,  8,  8,  8,  8,  8,  8,  8 ],
+        [  8,  1,  8,  8,  8,  8,  1,  8 ],
+        [  1,  1,  8,  8,  8,  8,  1,  1 ],
+        [ null,  1,  8,  1,  1,  8,  1, null ]
+    ]
+};
+function getEnemySprite(name) {
+    return ENEMY_SPRITES[name] || ENEMY_SPRITES['giant-rat'];
+}
+
 async function buildSMSRom() {
     const api = window.TinyRPGMaker;
     if (!api) throw new Error('Engine not ready — please wait and try again.');
@@ -673,6 +771,35 @@ async function buildSMSRom() {
     }
     const objectTileLast = objectTileFirst + OBJECT_TILE_NAMES.length - 1;
 
+    /* ── Enemy tiles ──
+       8 BG tiles appended right after the object tiles. The C side learns
+       each tile's number from the header bytes at the start of enemies.dat.
+       Same compositing trick as objects: null pixels fall back to BG[0]
+       (the default floor) so an enemy on grass looks like "enemy on grass". */
+    const ENEMY_TYPE_ORDER = [
+        'giant-rat',     // ENEMY_TYPE_GIANT_RAT
+        'bandit',        // ENEMY_TYPE_BANDIT
+        'skeleton',      // ENEMY_TYPE_SKELETON
+        'dark-knight',   // ENEMY_TYPE_DARK_KNIGHT
+        'necromancer',   // ENEMY_TYPE_NECROMANCER
+        'dragon',        // ENEMY_TYPE_DRAGON
+        'fallen-king',   // ENEMY_TYPE_FALLEN_KING
+        'ancient-demon', // ENEMY_TYPE_ANCIENT_DEMON
+    ];
+    const enemyTileFirst = objectTileLast + 1;
+    for (let i = 0; i < ENEMY_TYPE_ORDER.length; i++) {
+        const matrix = getEnemySprite(ENEMY_TYPE_ORDER[i]);
+        const composed = matrix.map((row, r) => row.map((v, c) => {
+            if (v != null) return palette[v] || palette[0];
+            const fr = floorPxHex[r];
+            return (fr && fr[c]) || palette[0];
+        }));
+        tileBuf.push(...encodeBGTile(composed, palette));
+        const tn = enemyTileFirst + i;
+        while (attrBuf.length < tn * 2) attrBuf.push(0);
+    }
+    const enemyTileLast = enemyTileFirst + ENEMY_TYPE_ORDER.length - 1;
+
     /* ── Maps ── */
     setStatus('Encoding maps…', '#8af');
     const mapFiles = [];
@@ -820,6 +947,49 @@ async function buildSMSRom() {
             placedObjects.map(o => `${o.type}@r${o.roomIndex}(${o.x},${o.y})${o.variableId ? '/' + o.variableId : ''}`));
     }
 
+    /* ── enemies.dat ──
+       Header (N_ENEMY_TYPES = 8 bytes): BG tile number for each enemy type,
+                                         in ENEMY_TYPE_ORDER order.
+       Byte 8:                         enemy_count (0..32)
+       Bytes 9..:                      per enemy, 4 bytes: type, room, x, y.
+       Lives / damage / xp-reward are looked up by type on the C side,
+       so this stays compact (137 bytes max). */
+    const MAX_ENEMIES = 32;
+    const ENEMY_TYPE_MAP = {
+        'giant-rat':     0,
+        'bandit':        1,
+        'skeleton':      2,
+        'dark-knight':   3,
+        'necromancer':   4,
+        'dragon':        5,
+        'fallen-king':   6,
+        'ancient-demon': 7,
+    };
+    const rawEnemies = Array.isArray(gameData.enemies) ? gameData.enemies : [];
+    const placedEnemies = rawEnemies.filter(e =>
+        e && e.type && ENEMY_TYPE_MAP[e.type] !== undefined &&
+        Number.isFinite(e.roomIndex) && e.roomIndex >= 0 && e.roomIndex < ROOM_COUNT &&
+        Number.isFinite(e.x) && e.x >= 0 && e.x < 8 &&
+        Number.isFinite(e.y) && e.y >= 0 && e.y < 8
+    ).slice(0, MAX_ENEMIES);
+    const enemiesBuf = [];
+    for (let i = 0; i < ENEMY_TYPE_ORDER.length; i++) {
+        enemiesBuf.push((enemyTileFirst + i) & 0xFF);
+    }
+    enemiesBuf.push(placedEnemies.length & 0xFF);
+    for (const e of placedEnemies) {
+        enemiesBuf.push(
+            ENEMY_TYPE_MAP[e.type] & 0xFF,
+            e.roomIndex & 0xFF,
+            (e.x|0) & 0xFF,
+            (e.y|0) & 0xFF
+        );
+    }
+    if (placedEnemies.length > 0) {
+        console.log('[SMS] Enemies (' + placedEnemies.length + '/' + MAX_ENEMIES + '):',
+            placedEnemies.map(e => `${e.type}@r${e.roomIndex}(${e.x},${e.y})`));
+    }
+
     /* ── endings.dat ──
        9 fixed-length slots (one per room), 36 bytes each, total 324 bytes.
        Each slot is the endingText from that room's player-end object (if any),
@@ -843,7 +1013,7 @@ async function buildSMSRom() {
     const worldRows = (gameData.world && gameData.world.rows) ? Math.max(1, gameData.world.rows) : 3;
     const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title),
         worldCols & 0xFF, worldRows & 0xFF];
-    const totalTN = objectTileLast;
+    const totalTN = enemyTileLast;
     const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
 
     /* ── Per-room sprite files ──
@@ -874,6 +1044,7 @@ async function buildSMSRom() {
         { name:'entities.dat',content:entBuf },
         { name:'objects.dat', content:objBuf },
         { name:'endings.dat', content:endingsBuf },
+        { name:'enemies.dat', content:enemiesBuf },
         { name:'project.inf', content:projInfo },
         { name:'merging.dat', content:combos },
         ...mapFiles,
@@ -897,7 +1068,7 @@ async function buildSMSRom() {
     for (const m of roomTypeMaps) for (const k of m.keys()) allSprites.add(k);
     const nTypes = allSprites.size;
     const summary = `${kb} KB · ${liveTiles.length} tiles · ${nNpcs} NPCs` +
-        ` (${nTypes} sprite${nTypes!==1?'s':''}) · ${placedObjects.length} obj · start: room ${startRoom+1} (${startX},${startY})`;
+        ` (${nTypes} sprite${nTypes!==1?'s':''}) · ${placedObjects.length} obj · ${placedEnemies.length} enemy · start: room ${startRoom+1} (${startX},${startY})`;
 
     return { rom, filename, title, summary };
 }
