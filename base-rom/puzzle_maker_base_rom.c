@@ -410,6 +410,27 @@ static void var_clear(unsigned char i) {
 #define OBJECT_STATE_ON         (0x02)
 #define ENDING_TEXT_LEN         (36)  /* matches NPC_DIALOG_LEN */
 
+/* ── Enemy system ──
+   Enemies are placed in the editor like NPCs/objects. Each has a TYPE
+   (giant-rat..ancient-demon, 8 types total) with fixed lives, damage and
+   xp-reward values; per-instance state tracks current HP and whether
+   the enemy is dead. Walking onto an enemy resolves one round of combat
+   (player and enemy each deal damage simultaneously). If the enemy dies,
+   its tile clears to floor and the player gains XP and moves into the
+   cell. If the player dies, the game ends. */
+#define MAX_ENEMIES             (32)
+#define N_ENEMY_TYPES           (8)
+#define ENEMY_TYPE_GIANT_RAT    (0)
+#define ENEMY_TYPE_BANDIT       (1)
+#define ENEMY_TYPE_SKELETON     (2)
+#define ENEMY_TYPE_DARK_KNIGHT  (3)
+#define ENEMY_TYPE_NECROMANCER  (4)
+#define ENEMY_TYPE_DRAGON       (5)
+#define ENEMY_TYPE_FALLEN_KING  (6)
+#define ENEMY_TYPE_ANCIENT_DEMON (7)
+#define ENEMY_STATE_DEAD        (0x01)
+#define PLAYER_STARTING_LIVES   (3)
+
 typedef struct {
 	unsigned char type;
 	unsigned char room;
@@ -427,9 +448,12 @@ static unsigned char player_xp;
 static unsigned char player_sword_type;       /* 0 = none */
 static unsigned char player_sword_durability;
 /* Game-ending state. PLAYER_END objects show a per-room ending text
-   in the dialog row, then end the game when the dialog closes. */
+   in the dialog row, then end the game when the dialog closes.
+   player_won distinguishes victory (player_end reached) from defeat
+   (player lives ran out from enemy combat). */
 static char          game_ended;
 static char          pending_ending;
+static char          player_won;
 static char          player_end_texts[9][ENDING_TEXT_LEN];
 /* HUD: a one-line status bar at the very top of the screen showing
    keys / lives / XP / sword. Redrawn lazily when hud_dirty is set —
@@ -448,10 +472,19 @@ static unsigned char sword_priority(unsigned char type) {
 
 static unsigned char sword_durability_for(unsigned char type) {
 	switch (type) {
-		case OBJ_TYPE_SWORD_WOOD:   return 2;
-		case OBJ_TYPE_SWORD_BRONZE: return 3;
+		case OBJ_TYPE_SWORD_WOOD:   return 3;
+		case OBJ_TYPE_SWORD_BRONZE: return 4;
 		case OBJ_TYPE_SWORD:        return 5;
 		default:                    return 0;
+	}
+}
+
+static unsigned char player_damage_for_sword(void) {
+	switch (player_sword_type) {
+		case OBJ_TYPE_SWORD_WOOD:   return 2;
+		case OBJ_TYPE_SWORD_BRONZE: return 3;
+		case OBJ_TYPE_SWORD:        return 4;
+		default:                    return 1;   /* bare hands */
 	}
 }
 
@@ -481,6 +514,149 @@ static void load_endings(void) {
 		player_end_texts[r][ENDING_TEXT_LEN - 1] = 0;
 	}
 }
+
+/* ── Enemy data ────────────────────────────────────────────────────── */
+
+typedef struct {
+	unsigned char type;
+	unsigned char room;
+	unsigned char x;
+	unsigned char y;
+	unsigned char lives;   /* current HP, 0 = dead */
+	unsigned char state;   /* bit 0 = ENEMY_STATE_DEAD */
+} enemy_t;
+
+static enemy_t       enemy_data[MAX_ENEMIES];
+static unsigned char enemy_count;
+/* BG tile number for each enemy type, written by the JS encoder as the
+   first N_ENEMY_TYPES bytes of enemies.dat. */
+static unsigned char enemy_tile_for_type[N_ENEMY_TYPES];
+
+/* Per-type starting lives / damage / xp reward, mirrors TRS
+   EnemyDefinitions (giant-rat..ancient-demon). */
+static unsigned char enemy_max_lives(unsigned char type) {
+	static const unsigned char table[N_ENEMY_TYPES] = {1, 2, 3, 4, 5, 6, 7, 8};
+	if (type >= N_ENEMY_TYPES) return 1;
+	return table[type];
+}
+static unsigned char enemy_damage(unsigned char type) {
+	static const unsigned char table[N_ENEMY_TYPES] = {1, 1, 1, 2, 2, 3, 3, 3};
+	if (type >= N_ENEMY_TYPES) return 1;
+	return table[type];
+}
+static unsigned char enemy_xp(unsigned char type) {
+	static const unsigned char table[N_ENEMY_TYPES] = {3, 4, 5, 7, 8, 9, 10, 11};
+	if (type >= N_ENEMY_TYPES) return 0;
+	return table[type];
+}
+
+static void load_enemies(void) {
+	unsigned char i;
+	unsigned char *p;
+	resource_entry_format *e;
+
+	enemy_count = 0;
+	for (i = 0; i < N_ENEMY_TYPES; i++) enemy_tile_for_type[i] = 0;
+
+	e = resource_find("enemies.dat");
+	if (!e) return;
+	if (e->size < (unsigned int)(N_ENEMY_TYPES + 1)) return;
+	p = (unsigned char *)resource_get_pointer(e);
+	if (!p) return;
+
+	for (i = 0; i < N_ENEMY_TYPES; i++) enemy_tile_for_type[i] = p[i];
+	p += N_ENEMY_TYPES;
+
+	enemy_count = *p++;
+	if (enemy_count > MAX_ENEMIES) enemy_count = MAX_ENEMIES;
+
+	for (i = 0; i < enemy_count; i++) {
+		enemy_data[i].type  = *p++;
+		enemy_data[i].room  = *p++;
+		enemy_data[i].x     = *p++;
+		enemy_data[i].y     = *p++;
+		enemy_data[i].lives = enemy_max_lives(enemy_data[i].type);
+		enemy_data[i].state = 0;
+	}
+}
+
+/* Paint not-yet-dead enemies of the given room onto map_data. */
+static void apply_enemies_to_map(unsigned char room) {
+	unsigned char i, idx, tile;
+	for (i = 0; i < enemy_count; i++) {
+		if (enemy_data[i].room != room) continue;
+		if (enemy_data[i].state & ENEMY_STATE_DEAD) continue;
+		if (enemy_data[i].type >= N_ENEMY_TYPES) continue;
+		if (enemy_data[i].x >= 8 || enemy_data[i].y >= 8) continue;
+		tile = enemy_tile_for_type[enemy_data[i].type];
+		if (tile == 0) continue;
+		idx = enemy_data[i].y * 8 + enemy_data[i].x;
+		map_data[idx] = tile;
+	}
+}
+
+static unsigned char find_enemy_at(unsigned char room, unsigned char x, unsigned char y) {
+	unsigned char i;
+	for (i = 0; i < enemy_count; i++) {
+		if (enemy_data[i].state & ENEMY_STATE_DEAD) continue;
+		if (enemy_data[i].room == room &&
+		    enemy_data[i].x == x &&
+		    enemy_data[i].y == y) {
+			return i;
+		}
+	}
+	return 0xFF;
+}
+
+/* Resolve one round of combat with the enemy at the given index.
+   Returns 1 if the enemy was defeated (player can move into the cell)
+   and 0 if the enemy is still alive (player stays put).
+   Mirrors TRS legacy combat: player and enemy both deal damage in the
+   same exchange. Each successful hit also costs one point of sword
+   durability; when durability hits 0 the sword breaks (returns to bare
+   hands). If player_lives reaches 0 the game ends with player_won = 0. */
+static char handle_enemy_combat(unsigned char idx) {
+	enemy_t *e = &enemy_data[idx];
+	unsigned char pdamage = player_damage_for_sword();
+	unsigned char edamage = enemy_damage(e->type);
+
+	/* Player → enemy */
+	if (pdamage >= e->lives) {
+		/* Enemy defeated */
+		e->state |= ENEMY_STATE_DEAD;
+		e->lives = 0;
+		map_data[e->y * 8 + e->x] = OBJECT_FLOOR_TILE;
+		is_map_data_dirty = 1;
+		if (player_xp + enemy_xp(e->type) < 255)
+			player_xp += enemy_xp(e->type);
+		else
+			player_xp = 255;
+		/* Sword chips when it kills */
+		if (player_sword_durability > 0) {
+			player_sword_durability--;
+			if (player_sword_durability == 0) player_sword_type = 0;
+		}
+		hud_dirty = 1;
+		return 1;
+	}
+	e->lives -= pdamage;
+
+	/* Enemy → player */
+	if (player_lives <= edamage) {
+		player_lives = 0;
+		player_won   = 0;
+		game_ended   = 1;
+	} else {
+		player_lives -= edamage;
+	}
+	if (player_sword_durability > 0) {
+		player_sword_durability--;
+		if (player_sword_durability == 0) player_sword_type = 0;
+	}
+	hud_dirty = 1;
+	return 0;
+}
+
 /* Per-type BG tile numbers; filled from the header of objects.dat.
    The JS encoder writes these as the first N_OBJ_TILES bytes so the
    C side stays agnostic to the BG-tile-count + object-tile layout.
@@ -610,9 +786,10 @@ static char handle_object_at(unsigned char idx) {
 			}
 			return 0;
 		case OBJ_TYPE_PLAYER_END:
-			/* End the game. If a per-room ending text exists, show it
-			   in the dialog row and end after the dialog closes; else
-			   end immediately. */
+			/* End the game with a victory state. If a per-room ending
+			   text exists, show it in the dialog row and end after the
+			   dialog closes; else end immediately. */
+			player_won = 1;
 			if (obj->room < 9 && player_end_texts[obj->room][0]) {
 				show_npc_dialog(player_end_texts[obj->room]);
 				pending_ending = 1;
@@ -849,13 +1026,15 @@ char gameplay_loop() {
 	   in RAM, so it survives room transitions naturally. */
 	load_objects();
 	load_endings();
+	load_enemies();
 	player_keys             = 0;
-	player_lives            = 0;
+	player_lives            = PLAYER_STARTING_LIVES;
 	player_xp               = 0;
 	player_sword_type       = 0;
 	player_sword_durability = 0;
 	game_ended              = 0;
 	pending_ending          = 0;
+	player_won              = 0;
 	hud_dirty               = 1;
 	
 	while (1) {
@@ -890,6 +1069,7 @@ char gameplay_loop() {
 		   cell does not interfere with locating the start. */
 		player_find_start(map);
 		apply_objects_to_map((unsigned char)(map_number - 1));
+		apply_enemies_to_map((unsigned char)(map_number - 1));
 		draw_map(map);
 
 		load_room_sprites((unsigned char)(map_number - 1));
@@ -926,6 +1106,16 @@ char gameplay_loop() {
 						if (_ni) {
 							show_npc_dialog_for((unsigned char)(_ni - 1));
 						} else {
+							/* Enemy combat check fires before objects:
+							   walking onto an enemy resolves one round of
+							   combat. If the enemy survives the player
+							   does not move into the cell. */
+							unsigned char _ei = find_enemy_at(_room, _tx, _ty);
+							if (_ei != 0xFF) {
+								if (handle_enemy_combat(_ei)) {
+									set_actor_map_xy(&player, _tx, _ty);
+								}
+							} else {
 							/* Object interaction takes priority over both edge
 							   crossing and try_moving_actor_on_map: the player
 							   may try to step onto an in-room object even at
@@ -957,6 +1147,7 @@ char gameplay_loop() {
 									if (map) {
 										prepare_map_data(map);
 										apply_objects_to_map((unsigned char)(map_number - 1));
+										apply_enemies_to_map((unsigned char)(map_number - 1));
 										set_actor_map_xy(&player, wrap_x, wrap_y);
 										load_room_sprites((unsigned char)(map_number - 1));
 										init_npc_actors((unsigned char)(map_number - 1));
@@ -967,6 +1158,7 @@ char gameplay_loop() {
 							} else {
 								try_moving_actor_on_map(&player, map, _dx, _dy);
 							}
+							} /* end of enemy-else (object/edge/move branch) */
 						}
 					}
 				}
@@ -1012,8 +1204,8 @@ char gameplay_loop() {
 char handle_gameover() {
 	initialize_graphics();
 
-	SMS_setNextTileatXY(12, 11);
-	puts("THE END");
+	SMS_setNextTileatXY(player_won ? 12 : 11, 11);
+	puts(player_won ? "THE END" : "GAME OVER");
 
 	SMS_setNextTileatXY(7, 14);
 	puts("Press any button");
