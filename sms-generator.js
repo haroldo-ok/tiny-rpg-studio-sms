@@ -25,10 +25,14 @@
 const BASE_ROM_B64 = "BASE_ROM_PLACEHOLDER";
 
 const N_NPC_SPRITE_TYPES = 8; // must match MAX_NPC_SPRITE_TYPES in C
-/* First tileNumber available for BG tiles, after the reserved sprite region.
-   Layout: BG[0]=tile 1; player=tiles 2-5; NPC[0..N-1]=tiles 6..(6+4N-1).
-   So the first BG tile (BG[1]) is at tile (6 + 4*N). */
-const FIRST_BG_TILE = 6 + 4 * N_NPC_SPRITE_TYPES; // 38 for N=8
+const N_ENEMY_SPRITE_TYPES = 4; // must match MAX_ENEMY_SPRITE_TYPES in C
+/* Tile numbers reserve:
+   1                              BG[0]
+   2..5                           player sprite (4 tile-numbers × 4 sub-tiles = 16)
+   6..(6+4N-1)                    NPC types  (8 × 4 = 32 tile-numbers)
+   (6+4N)..(6+4N+4E-1)            enemy types (4 × 4 = 16 tile-numbers)
+   FIRST_BG_TILE = 6 + 4N + 4E   first BG tile (was 38 before enemy sprites). */
+const FIRST_BG_TILE = 6 + 4 * N_NPC_SPRITE_TYPES + 4 * N_ENEMY_SPRITE_TYPES; // 54
 
 function b64ToBytes(b64) {
     const bin = atob(b64);
@@ -634,6 +638,39 @@ async function buildSMSRom() {
             N_NPC_SPRITE_TYPES + ' types per room; extras fall back to slot 0.');
     }
 
+    /* ── Enemy per-room sprite-type assignment ──
+       Same pattern as NPCs but a separate VRAM region (slot block 8..11
+       within each per-room sprite file). Each room can host up to
+       N_ENEMY_SPRITE_TYPES distinct enemy visuals; the JS resolves each
+       enemy's per-room slot index (0..3) here, then writes it as the
+       sprite_slot byte in enemies.dat. */
+    const ENEMY_TYPE_NAMES_FOR_VRAM = [
+        'giant-rat', 'bandit', 'skeleton', 'dark-knight',
+        'necromancer', 'dragon', 'fallen-king', 'ancient-demon'
+    ];
+    const isEnemyType = (t) => ENEMY_TYPE_NAMES_FOR_VRAM.indexOf(String(t)) >= 0;
+    const rawEnemiesEarly = Array.isArray(gameData.enemies) ? gameData.enemies : [];
+    const roomEnemyMaps = []; // [roomIdx] → Map(enemyType → slotIdx)
+    for (let r = 0; r < ROOM_COUNT; r++) roomEnemyMaps.push(new Map());
+    let enemyOverflow = 0;
+    for (const en of rawEnemiesEarly) {
+        if (!en || !isEnemyType(en.type)) continue;
+        const room = (en.roomIndex|0);
+        if (room < 0 || room >= ROOM_COUNT) continue;
+        const m = roomEnemyMaps[room];
+        if (!m.has(en.type)) {
+            if (m.size < N_ENEMY_SPRITE_TYPES) {
+                m.set(en.type, m.size);
+            } else {
+                enemyOverflow++;
+            }
+        }
+    }
+    if (enemyOverflow > 0) {
+        console.warn('[SMS] ' + enemyOverflow + ' enemy visual(s) exceeded ' +
+            N_ENEMY_SPRITE_TYPES + ' types per room; extras fall back to slot 0.');
+    }
+
     /* ── BG tiles ── */
     setStatus('Encoding tiles…', '#8af');
     const liveTiles = api.getTiles();
@@ -664,6 +701,15 @@ async function buildSMSRom() {
     const NPC_BLOCK_SIZE = 512; // 16 sub-tiles × 32 bytes
     for (let t = 0; t < N_NPC_SPRITE_TYPES; t++) {
         for (let b = 0; b < NPC_BLOCK_SIZE; b++) tileBuf.push(0);
+    }
+    /* Enemy sprite VRAM region — 4 slots of 512 bytes each. Like the NPC
+       region these are zero-padded in main.til; they're filled per-room
+       by load_room_sprites() via the same roomNN.spr file (which now
+       contains NPC sprites followed by enemy sprites). */
+    const enemySlotOffset = tileBuf.length;
+    const ENEMY_BLOCK_SIZE = 512;
+    for (let t = 0; t < N_ENEMY_SPRITE_TYPES; t++) {
+        for (let b = 0; b < ENEMY_BLOCK_SIZE; b++) tileBuf.push(0);
     }
     for (let i = 1; i < liveTiles.length; i++)
         tileBuf.push(...encodeBGTile(getTilePx(liveTiles[i]), palette)); // BG[1..N]
@@ -703,6 +749,17 @@ async function buildSMSRom() {
             const frames = buildSpriteFrames(getNpcSprite(spriteName));
             for (let b = 0; b < NPC_BLOCK_SIZE; b++) {
                 tileBuf[npcSlotOffset + s * NPC_BLOCK_SIZE + b] = frames[b];
+            }
+        }
+        const startEnemyMap = roomEnemyMaps[startRoom] || new Map();
+        for (let s = 0; s < N_ENEMY_SPRITE_TYPES; s++) {
+            let enemyName = null;
+            for (const [k, v] of startEnemyMap) if (v === s) { enemyName = k; break; }
+            // Empty slot: fill with the giant-rat as a harmless placeholder
+            const sprite = getEnemySprite(enemyName || 'giant-rat');
+            const frames = buildSpriteFrames(sprite);
+            for (let b = 0; b < ENEMY_BLOCK_SIZE; b++) {
+                tileBuf[enemySlotOffset + s * ENEMY_BLOCK_SIZE + b] = frames[b];
             }
         }
     }
@@ -770,35 +827,6 @@ async function buildSMSRom() {
         while (attrBuf.length < tn * 2) attrBuf.push(0);
     }
     const objectTileLast = objectTileFirst + OBJECT_TILE_NAMES.length - 1;
-
-    /* ── Enemy tiles ──
-       8 BG tiles appended right after the object tiles. The C side learns
-       each tile's number from the header bytes at the start of enemies.dat.
-       Same compositing trick as objects: null pixels fall back to BG[0]
-       (the default floor) so an enemy on grass looks like "enemy on grass". */
-    const ENEMY_TYPE_ORDER = [
-        'giant-rat',     // ENEMY_TYPE_GIANT_RAT
-        'bandit',        // ENEMY_TYPE_BANDIT
-        'skeleton',      // ENEMY_TYPE_SKELETON
-        'dark-knight',   // ENEMY_TYPE_DARK_KNIGHT
-        'necromancer',   // ENEMY_TYPE_NECROMANCER
-        'dragon',        // ENEMY_TYPE_DRAGON
-        'fallen-king',   // ENEMY_TYPE_FALLEN_KING
-        'ancient-demon', // ENEMY_TYPE_ANCIENT_DEMON
-    ];
-    const enemyTileFirst = objectTileLast + 1;
-    for (let i = 0; i < ENEMY_TYPE_ORDER.length; i++) {
-        const matrix = getEnemySprite(ENEMY_TYPE_ORDER[i]);
-        const composed = matrix.map((row, r) => row.map((v, c) => {
-            if (v != null) return palette[v] || palette[0];
-            const fr = floorPxHex[r];
-            return (fr && fr[c]) || palette[0];
-        }));
-        tileBuf.push(...encodeBGTile(composed, palette));
-        const tn = enemyTileFirst + i;
-        while (attrBuf.length < tn * 2) attrBuf.push(0);
-    }
-    const enemyTileLast = enemyTileFirst + ENEMY_TYPE_ORDER.length - 1;
 
     /* ── Maps ── */
     setStatus('Encoding maps…', '#8af');
@@ -948,12 +976,11 @@ async function buildSMSRom() {
     }
 
     /* ── enemies.dat ──
-       Header (N_ENEMY_TYPES = 8 bytes): BG tile number for each enemy type,
-                                         in ENEMY_TYPE_ORDER order.
-       Byte 8:                         enemy_count (0..32)
-       Bytes 9..:                      per enemy, 4 bytes: type, room, x, y.
-       Lives / damage / xp-reward are looked up by type on the C side,
-       so this stays compact (137 bytes max). */
+       Byte 0:    enemy_count (0..32)
+       Bytes 1..: per enemy, 5 bytes: type, room, x, y, sprite_slot.
+       Lives / damage / xp-reward are looked up by type on the C side.
+       sprite_slot (0..N_ENEMY_SPRITE_TYPES-1) is the per-room index into
+       the enemy half of the room's roomNN.spr file. */
     const MAX_ENEMIES = 32;
     const ENEMY_TYPE_MAP = {
         'giant-rat':     0,
@@ -965,24 +992,22 @@ async function buildSMSRom() {
         'fallen-king':   6,
         'ancient-demon': 7,
     };
-    const rawEnemies = Array.isArray(gameData.enemies) ? gameData.enemies : [];
-    const placedEnemies = rawEnemies.filter(e =>
+    const placedEnemies = rawEnemiesEarly.filter(e =>
         e && e.type && ENEMY_TYPE_MAP[e.type] !== undefined &&
         Number.isFinite(e.roomIndex) && e.roomIndex >= 0 && e.roomIndex < ROOM_COUNT &&
         Number.isFinite(e.x) && e.x >= 0 && e.x < 8 &&
         Number.isFinite(e.y) && e.y >= 0 && e.y < 8
     ).slice(0, MAX_ENEMIES);
     const enemiesBuf = [];
-    for (let i = 0; i < ENEMY_TYPE_ORDER.length; i++) {
-        enemiesBuf.push((enemyTileFirst + i) & 0xFF);
-    }
     enemiesBuf.push(placedEnemies.length & 0xFF);
     for (const e of placedEnemies) {
+        const slot = (roomEnemyMaps[e.roomIndex|0].get(e.type)) | 0;
         enemiesBuf.push(
             ENEMY_TYPE_MAP[e.type] & 0xFF,
             e.roomIndex & 0xFF,
             (e.x|0) & 0xFF,
-            (e.y|0) & 0xFF
+            (e.y|0) & 0xFF,
+            slot & 0xFF
         );
     }
     if (placedEnemies.length > 0) {
@@ -1013,13 +1038,15 @@ async function buildSMSRom() {
     const worldRows = (gameData.world && gameData.world.rows) ? Math.max(1, gameData.world.rows) : 3;
     const projInfo = [...strBytes('SMS-RPG-Studio'),...strBytes('1.0'),...strBytes(title),
         worldCols & 0xFF, worldRows & 0xFF];
-    const totalTN = enemyTileLast;
+    const totalTN = objectTileLast;
     const combos = [...u16(totalTN), ...new Array(totalTN * totalTN).fill(0)];
 
     /* ── Per-room sprite files ──
-       For each room, emit a 4 KB file (8 sprite types × 16 sub-tiles × 32 bytes)
-       containing the sprite tile data for that room. The C code's
-       load_room_sprites() loads this into VRAM slots 24..151 on entry. */
+       For each room, emit a file containing NPC sprites followed by enemy
+       sprites. Total size: (N_NPC_SPRITE_TYPES + N_ENEMY_SPRITE_TYPES) ×
+       16 sub-tiles × 32 bytes = (8 + 4) × 512 = 6144 bytes.
+       The C code's load_room_sprites() loads this whole blob at VRAM slot 24,
+       so the NPC half lands on slots 24..151 and the enemy half on 152..215. */
     const spriteFiles = [];
     for (let r = 0; r < ROOM_COUNT; r++) {
         const sprBuf = [];
@@ -1028,6 +1055,12 @@ async function buildSMSRom() {
             let spriteName = 'default';
             for (const [k, v] of m) { if (v === s) { spriteName = k; break; } }
             sprBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));
+        }
+        const em = roomEnemyMaps[r];
+        for (let s = 0; s < N_ENEMY_SPRITE_TYPES; s++) {
+            let enemyName = null;
+            for (const [k, v] of em) { if (v === s) { enemyName = k; break; } }
+            sprBuf.push(...buildSpriteFrames(getEnemySprite(enemyName || 'giant-rat')));
         }
         spriteFiles.push({
             name: `room${String(r+1).padStart(2,'0')}.spr`,
