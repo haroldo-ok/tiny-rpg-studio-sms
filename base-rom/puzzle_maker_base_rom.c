@@ -534,6 +534,13 @@ typedef struct {
 	unsigned char sprite_slot;  /* 0..MAX_ENEMY_SPRITE_TYPES-1; per-room */
 	unsigned char lives;        /* current HP, 0 = dead */
 	unsigned char state;        /* bit 0 = ENEMY_STATE_DEAD */
+	/* AI state: facing/last-move direction + 2-step inertia for the
+	   wander fallback. Mirrors TRS's moveDirectionX / moveDirectionY /
+	   moveDirectionSteps. Directional vision (TRS canEnemySeePlayer)
+	   reads move_dir_x/y to decide which way the enemy is looking. */
+	signed char   move_dir_x;
+	signed char   move_dir_y;
+	unsigned char move_dir_steps;
 } enemy_t;
 
 static enemy_t       enemy_data[MAX_ENEMIES];
@@ -582,6 +589,9 @@ static void load_enemies(void) {
 		enemy_data[i].sprite_slot = *p++;
 		enemy_data[i].lives       = enemy_max_lives(enemy_data[i].type);
 		enemy_data[i].state       = 0;
+		enemy_data[i].move_dir_x  = 0;
+		enemy_data[i].move_dir_y  = 0;
+		enemy_data[i].move_dir_steps = 0;
 		if (enemy_data[i].sprite_slot >= MAX_ENEMY_SPRITE_TYPES)
 			enemy_data[i].sprite_slot = 0;
 	}
@@ -1003,6 +1013,250 @@ static void init_npc_actors(unsigned char room_idx) {
 	}
 }
 
+/* ── Enemy AI ──
+   Ports TRS EnemyManager.moveEnemies: every ENEMY_MOVE_INTERVAL frames,
+   each enemy in the current room moves one tile, either chasing the
+   player (when in 2-tile directional vision) or wandering with a
+   2-step inertia commit (TRS moveDirectionSteps). Mirrors TRS's:
+     - getChaseDirections (axis-priority chase)
+     - tryMoveEnemy + findFreeDirection (random-walk with retry)
+     - canEnterTile (bounds + wall + closed door + NPC + other enemy)
+     - canEnemySeePlayer (one-axis facing direction from last move).
+*/
+#define ENEMY_MOVE_INTERVAL  (35)   /* ~700ms at 50fps PAL, ~580ms at 60fps */
+#define ENEMY_VISION_RANGE   (2)
+
+static unsigned char enemy_tick;
+static unsigned char rng_state = 1;
+
+/* xorshift8 — minimal-period PRNG, enough for picking a direction
+   among 4 candidates. The joystick state is XOR'd in once per AI
+   tick as a small entropy source so playthroughs diverge naturally. */
+static unsigned char rng_next(void) {
+	unsigned char x = rng_state;
+	if (!x) x = 1;
+	x ^= (unsigned char)(x << 7);
+	x ^= (unsigned char)(x >> 5);
+	x ^= (unsigned char)(x << 3);
+	rng_state = x;
+	return x;
+}
+
+/* Direction table: 0=right, 1=left, 2=down, 3=up. Used for random
+   walk and for the "find any free direction" fallback. */
+static const signed char enemy_dir_dx[4] = { 1, -1,  0,  0};
+static const signed char enemy_dir_dy[4] = { 0,  0,  1, -1};
+
+static char enemy_can_enter(unsigned char eidx, signed char tx, signed char ty) {
+	unsigned char tile;
+	unsigned int  attr;
+	unsigned char oi, i;
+
+	if (tx < 0 || ty < 0 || tx >= 8 || ty >= 8) return 0;
+
+	/* Wall: read tile from RAM (current room) and look up its attribute.
+	   get_tile_attr switches the ROM bank, which is fine here since we
+	   already have the tile number in hand and don't read banked memory
+	   afterwards in this call. */
+	tile = map_data[(unsigned char)ty * 8 + (unsigned char)tx];
+	attr = get_tile_attr((char)tile);
+	if (attr & TILE_ATTR_SOLID) return 0;
+
+	/* Closed doors block enemy movement; collectible / one-shot objects
+	   (key/potion/scroll/sword/switch) don't. Mirrors TRS
+	   hasBlockingObject. */
+	oi = find_object_at(enemy_data[eidx].room, (unsigned char)tx, (unsigned char)ty);
+	if (oi != 0xFF) {
+		object_t *obj = &objects[oi];
+		if (obj->type == OBJ_TYPE_DOOR && !(obj->state & OBJECT_STATE_DONE))
+			return 0;
+		if (obj->type == OBJ_TYPE_DOOR_VARIABLE) {
+			if (obj->variable_id == VAR_NONE || !var_get(obj->variable_id))
+				return 0;
+		}
+	}
+
+	/* NPCs are blocking. */
+	if (find_npc_at(enemy_data[eidx].room, (unsigned char)tx, (unsigned char)ty))
+		return 0;
+
+	/* Other live enemies in the same room are blocking. */
+	for (i = 0; i < enemy_count; i++) {
+		if (i == eidx) continue;
+		if (enemy_data[i].state & ENEMY_STATE_DEAD) continue;
+		if (enemy_data[i].room != enemy_data[eidx].room) continue;
+		if (enemy_data[i].x == (unsigned char)tx &&
+		    enemy_data[i].y == (unsigned char)ty) return 0;
+	}
+	return 1;
+}
+
+/* Returns 1 iff (px,py) is within ENEMY_VISION_RANGE on both axes AND
+   in the enemy's facing direction (decided by which of move_dir_x /
+   move_dir_y had the larger magnitude on the last move). With both
+   dirs zero (initial state) the enemy is "facing down". */
+static char enemy_can_see(unsigned char eidx, unsigned char px, unsigned char py) {
+	enemy_t *e = &enemy_data[eidx];
+	signed char dxp = (signed char)px - (signed char)e->x;
+	signed char dyp = (signed char)py - (signed char)e->y;
+	unsigned char adx = (unsigned char)(dxp < 0 ? -dxp : dxp);
+	unsigned char ady = (unsigned char)(dyp < 0 ? -dyp : dyp);
+	signed char mx, my;
+	unsigned char amx, amy;
+
+	if (adx > ENEMY_VISION_RANGE || ady > ENEMY_VISION_RANGE) return 0;
+
+	mx = e->move_dir_x;
+	my = e->move_dir_y;
+	amx = (unsigned char)(mx < 0 ? -mx : mx);
+	amy = (unsigned char)(my < 0 ? -my : my);
+
+	if (amx == 0 && amy == 0) {
+		/* No previous movement — face down by default. */
+		return (signed char)py >= (signed char)e->y;
+	}
+	if (amx >= amy) {
+		/* Facing along X axis. */
+		return (mx >= 0) ? ((signed char)px >= (signed char)e->x)
+		                 : ((signed char)px <= (signed char)e->x);
+	}
+	return (my >= 0) ? ((signed char)py >= (signed char)e->y)
+	                 : ((signed char)py <= (signed char)e->y);
+}
+
+/* Commit the enemy to a new position. Updates the actor's pixel coords
+   so the next frame's draw_actor renders at the new spot, and stamps
+   the move direction so the vision check tracks facing correctly. */
+static void enemy_move_to(unsigned char eidx, signed char tx, signed char ty) {
+	enemy_t *e = &enemy_data[eidx];
+	signed char dx = tx - (signed char)e->x;
+	signed char dy = ty - (signed char)e->y;
+	e->move_dir_x = dx;
+	e->move_dir_y = dy;
+	e->x = (unsigned char)tx;
+	e->y = (unsigned char)ty;
+	set_actor_map_xy(&enemy_actors[eidx], (char)tx, (char)ty);
+}
+
+/* Chase mode: walk one tile toward the player, preferring whichever
+   axis has the larger remaining delta. Two candidate dirs; first one
+   that's enterable wins. Stepping onto the player triggers combat. */
+static char try_chase_enemy(unsigned char eidx, unsigned char px, unsigned char py) {
+	enemy_t *e = &enemy_data[eidx];
+	signed char dx = (signed char)px - (signed char)e->x;
+	signed char dy = (signed char)py - (signed char)e->y;
+	unsigned char adx = (unsigned char)(dx < 0 ? -dx : dx);
+	unsigned char ady = (unsigned char)(dy < 0 ? -dy : dy);
+	signed char sx = (dx < 0) ? -1 : (dx > 0 ? 1 : 0);
+	signed char sy = (dy < 0) ? -1 : (dy > 0 ? 1 : 0);
+	signed char step_x[2], step_y[2];
+	unsigned char n = 0, i;
+
+	if (adx >= ady) {
+		if (sx) { step_x[n]=sx; step_y[n]=0;  n++; }
+		if (sy) { step_x[n]=0;  step_y[n]=sy; n++; }
+	} else {
+		if (sy) { step_x[n]=0;  step_y[n]=sy; n++; }
+		if (sx) { step_x[n]=sx; step_y[n]=0;  n++; }
+	}
+
+	for (i = 0; i < n; i++) {
+		signed char tx = (signed char)e->x + step_x[i];
+		signed char ty = (signed char)e->y + step_y[i];
+		if (tx < 0 || ty < 0 || tx >= 8 || ty >= 8) continue;
+		/* Stepping onto the player resolves a combat round. */
+		if (tx == (signed char)px && ty == (signed char)py) {
+			handle_enemy_combat(eidx);
+			return 1;
+		}
+		if (enemy_can_enter(eidx, tx, ty)) {
+			enemy_move_to(eidx, tx, ty);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* Wander mode: TRS-style 2-step direction commit. While
+   move_dir_steps > 0 keep stepping the same way; otherwise pick a new
+   random direction. If the committed step is blocked, look for any
+   free direction (random starting offset to keep movement varied). */
+static char try_wander_enemy(unsigned char eidx, unsigned char px, unsigned char py) {
+	enemy_t *e = &enemy_data[eidx];
+	signed char step_x, step_y, tx, ty;
+	unsigned char start, i;
+
+	if (e->move_dir_steps > 0 && (e->move_dir_x != 0 || e->move_dir_y != 0)) {
+		step_x = e->move_dir_x;
+		step_y = e->move_dir_y;
+		e->move_dir_steps--;
+	} else {
+		unsigned char r = (unsigned char)(rng_next() & 3);
+		step_x = enemy_dir_dx[r];
+		step_y = enemy_dir_dy[r];
+		e->move_dir_x = step_x;
+		e->move_dir_y = step_y;
+		e->move_dir_steps = 2;
+	}
+
+	tx = (signed char)e->x + step_x;
+	ty = (signed char)e->y + step_y;
+
+	if (tx >= 0 && ty >= 0 && tx < 8 && ty < 8) {
+		if (tx == (signed char)px && ty == (signed char)py) {
+			handle_enemy_combat(eidx);
+			return 1;
+		}
+		if (enemy_can_enter(eidx, tx, ty)) {
+			enemy_move_to(eidx, tx, ty);
+			return 1;
+		}
+	}
+
+	/* Blocked — try every other direction starting from a random offset. */
+	start = (unsigned char)(rng_next() & 3);
+	for (i = 0; i < 4; i++) {
+		unsigned char d = (unsigned char)((start + i) & 3);
+		signed char fx = enemy_dir_dx[d];
+		signed char fy = enemy_dir_dy[d];
+		signed char fxt, fyt;
+		if (fx == step_x && fy == step_y) continue;
+		fxt = (signed char)e->x + fx;
+		fyt = (signed char)e->y + fy;
+		if (fxt < 0 || fyt < 0 || fxt >= 8 || fyt >= 8) continue;
+		if (fxt == (signed char)px && fyt == (signed char)py) {
+			handle_enemy_combat(eidx);
+			return 1;
+		}
+		if (enemy_can_enter(eidx, fxt, fyt)) {
+			e->move_dir_x = fx;
+			e->move_dir_y = fy;
+			e->move_dir_steps = 2;
+			enemy_move_to(eidx, fxt, fyt);
+			return 1;
+		}
+	}
+	e->move_dir_steps = 0;
+	return 0;
+}
+
+/* One tick of enemy AI for the current room. Skips dead enemies and
+   bails out early if the player dies mid-tick (handle_enemy_combat
+   sets game_ended on lethal damage). */
+static void update_enemies(unsigned char current_room, unsigned char px, unsigned char py) {
+	unsigned char i;
+	for (i = 0; i < enemy_count; i++) {
+		if (enemy_data[i].state & ENEMY_STATE_DEAD) continue;
+		if (enemy_data[i].room != current_room) continue;
+		if (enemy_can_see(i, px, py)) {
+			try_chase_enemy(i, px, py);
+		} else {
+			try_wander_enemy(i, px, py);
+		}
+		if (game_ended) break;
+	}
+}
+
 /* Load the NPC sprite tiles for the given room into VRAM.
    The JS generator emits up to one "roomNN.spr" file per room, each containing
    up to MAX_NPC_SPRITE_TYPES sprite types × 16 sub-tiles × 32 bytes.
@@ -1048,6 +1302,7 @@ char gameplay_loop() {
 	pending_ending          = 0;
 	player_won              = 0;
 	hud_dirty               = 1;
+	enemy_tick              = 0;
 	
 	while (1) {
 		initialize_graphics();
@@ -1203,6 +1458,20 @@ char gameplay_loop() {
 				is_map_data_dirty = 0;
 			}
 			if (hud_dirty) draw_hud();
+
+			/* Enemy AI tick — fires every ENEMY_MOVE_INTERVAL frames.
+			   Paused while a dialog is active or the game has ended so
+			   enemies don't stomp the player mid-monologue. */
+			if (!dialog_active && !game_ended) {
+				enemy_tick++;
+				if (enemy_tick >= ENEMY_MOVE_INTERVAL) {
+					enemy_tick = 0;
+					rng_state ^= (unsigned char)joy;
+					update_enemies((unsigned char)(map_number - 1),
+						(unsigned char)get_actor_map_x(&player),
+						(unsigned char)get_actor_map_y(&player));
+				}
+			}
 			
 			joy_prev = joy;
 			joy = SMS_getKeysStatus();
