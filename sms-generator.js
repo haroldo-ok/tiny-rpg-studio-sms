@@ -582,6 +582,38 @@ async function buildSMSRom() {
     ? gameData.customPalette : DEFAULT_PAL;
     const palBytes = palette.map(hexToSmsByte);
 
+    /* ── Custom sprite override resolver ──
+       The editor lets the user repaint any sprite/tile and stores the
+       edits in gameData.customSprites as
+         { group: 'tile'|'npc'|'enemy'|'object'|'player', key, variant?, frames }
+       For each (group, key, variant) we look the entry up here and return
+       the first frame as an 8x8 matrix; everything that loads a sprite
+       checks this first and only falls back to the built-in art if no
+       override exists. We use frames[0] only — buildSpriteFrames already
+       expands one matrix into the 16-sub-tile per-direction set our SMS
+       runtime expects (no idle/walk animation to wire up yet). */
+    const customSpriteList = Array.isArray(gameData.customSprites) ? gameData.customSprites : [];
+    function getCustomFrame(group, key, variant) {
+        const wantVariant = variant || 'base';
+        for (const entry of customSpriteList) {
+            if (!entry || entry.group !== group) continue;
+            if (entry.key !== key) continue;
+            if ((entry.variant || 'base') !== wantVariant) continue;
+            if (!Array.isArray(entry.frames) || entry.frames.length === 0) continue;
+            const f = entry.frames[0];
+            if (!Array.isArray(f) || f.length !== 8) continue;
+            return f;
+        }
+        return null;
+    }
+    function spriteOr(group, key, variant, fallback) {
+        return getCustomFrame(group, key, variant) || fallback;
+    }
+    if (customSpriteList.length > 0) {
+        console.log('[SMS] Custom sprites: ' + customSpriteList.length + ' override(s) — ' +
+            customSpriteList.map(e => `${e.group}:${e.key}` + (e.variant && e.variant !== 'base' ? `(${e.variant})` : '')).join(', '));
+    }
+
     /* ── NPC types ──
        Collect the unique NPC types used, capped at N_NPC_SPRITE_TYPES.
        Variants like 'knight-elf' / 'knight-dwarf' share the human slot
@@ -694,7 +726,7 @@ async function buildSMSRom() {
     // then patch the start room slot fill after we resolve it below.
     const tileBuf = [];
     tileBuf.push(...encodeBGTile(getTilePx(liveTiles[0]), palette));  // BG[0], tileNum 1
-    tileBuf.push(...buildSpriteFrames(PLAYER_SP));                     // player, tileNums 2-5
+    tileBuf.push(...buildSpriteFrames(spriteOr('player', 'default', 'base', PLAYER_SP))); // player, tileNums 2-5
     // Sprite slots for room 0 will be patched in once startRoom is known.
     // For now, emit zero placeholders; they get overwritten below.
     const npcSlotOffset = tileBuf.length;
@@ -746,7 +778,8 @@ async function buildSMSRom() {
         for (let s = 0; s < N_NPC_SPRITE_TYPES; s++) {
             let spriteName = 'default';
             for (const [k, v] of startMap) if (v === s) { spriteName = k; break; }
-            const frames = buildSpriteFrames(getNpcSprite(spriteName));
+            const matrix = spriteOr('npc', spriteName, 'base', getNpcSprite(spriteName));
+            const frames = buildSpriteFrames(matrix);
             for (let b = 0; b < NPC_BLOCK_SIZE; b++) {
                 tileBuf[npcSlotOffset + s * NPC_BLOCK_SIZE + b] = frames[b];
             }
@@ -756,8 +789,9 @@ async function buildSMSRom() {
             let enemyName = null;
             for (const [k, v] of startEnemyMap) if (v === s) { enemyName = k; break; }
             // Empty slot: fill with the giant-rat as a harmless placeholder
-            const sprite = getEnemySprite(enemyName || 'giant-rat');
-            const frames = buildSpriteFrames(sprite);
+            const key = enemyName || 'giant-rat';
+            const matrix = spriteOr('enemy', key, 'base', getEnemySprite(key));
+            const frames = buildSpriteFrames(matrix);
             for (let b = 0; b < ENEMY_BLOCK_SIZE; b++) {
                 tileBuf[enemySlotOffset + s * ENEMY_BLOCK_SIZE + b] = frames[b];
             }
@@ -814,7 +848,15 @@ async function buildSMSRom() {
     const objectTileFirst = startTileNum + 1;
     const floorPxHex = getTilePx(liveTiles[0]);
     for (let i = 0; i < OBJECT_TILE_NAMES.length; i++) {
-        const matrix = getObjectSprite(OBJECT_TILE_NAMES[i]);
+        const tileName = OBJECT_TILE_NAMES[i];
+        /* OBJECT_TILE_NAMES uses 'switch--on' as a flat string for the
+           switch's lit visual; the editor's customSprites uses
+           {key: 'switch', variant: 'on'} for the same thing. Translate
+           here so a switch repaint in the editor flows through. */
+        let objKey = tileName, objVariant = 'base';
+        const sep = tileName.indexOf('--');
+        if (sep >= 0) { objKey = tileName.slice(0, sep); objVariant = tileName.slice(sep + 2); }
+        const matrix = spriteOr('object', objKey, objVariant, getObjectSprite(tileName));
         const composed = matrix.map((row, r) => row.map((v, c) => {
             if (v != null) return palette[v] || palette[0];
             const fr = floorPxHex[r];
@@ -1054,13 +1096,14 @@ async function buildSMSRom() {
         for (let s = 0; s < N_NPC_SPRITE_TYPES; s++) {
             let spriteName = 'default';
             for (const [k, v] of m) { if (v === s) { spriteName = k; break; } }
-            sprBuf.push(...buildSpriteFrames(getNpcSprite(spriteName)));
+            sprBuf.push(...buildSpriteFrames(spriteOr('npc', spriteName, 'base', getNpcSprite(spriteName))));
         }
         const em = roomEnemyMaps[r];
         for (let s = 0; s < N_ENEMY_SPRITE_TYPES; s++) {
             let enemyName = null;
             for (const [k, v] of em) { if (v === s) { enemyName = k; break; } }
-            sprBuf.push(...buildSpriteFrames(getEnemySprite(enemyName || 'giant-rat')));
+            const key = enemyName || 'giant-rat';
+            sprBuf.push(...buildSpriteFrames(spriteOr('enemy', key, 'base', getEnemySprite(key))));
         }
         spriteFiles.push({
             name: `room${String(r+1).padStart(2,'0')}.spr`,
