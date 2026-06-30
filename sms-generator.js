@@ -870,8 +870,82 @@ async function buildSMSRom() {
     }
     const objectTileLast = objectTileFirst + OBJECT_TILE_NAMES.length - 1;
 
-    /* ── Maps ── */
+    /* ── Maps with composite (ground+overlay) tiles ──
+       TRS stores tile placements in two layers per room: 'ground' (the
+       walkable base, drawn first) and 'overlay' (collision/decorative
+       tiles painted on top, with transparent pixels letting the ground
+       show through). On the SMS the BG layer has no per-pixel
+       transparency, so a cell with both layers needs a pre-composited
+       BG tile that bakes the overlay's opaque pixels onto the ground.
+
+       getCompositeTileNum dedupes: every unique (ground_id, overlay_id)
+       pair produces one new BG tile and reuses it for every cell with
+       that combination. Collision is inherited from the overlay when
+       present (in TRS, only collision-flagged tiles go into overlay). */
     setStatus('Encoding maps…', '#8af');
+    const compositeCache = new Map();
+    let nextCompositeTileNum = objectTileLast + 1;
+    const MAX_BG_TILE_NUM = 127; /* sub-tile slot 511 is the last we can address */
+
+    function getCompositeTileNum(groundId, overlayId) {
+        const key = (groundId == null ? '_' : String(groundId)) + '|' +
+                    (overlayId == null ? '_' : String(overlayId));
+        const cached = compositeCache.get(key);
+        if (cached !== undefined) return cached;
+
+        if (nextCompositeTileNum > MAX_BG_TILE_NUM) {
+            /* Out of tile slots — fall back to overlay-only (or ground-only)
+               so the build still completes; only a few cells will look off. */
+            console.warn('[SMS] Composite tile slot limit hit (' + MAX_BG_TILE_NUM +
+                '); falling back for ' + key);
+            const fbId = overlayId != null ? overlayId : groundId;
+            const fbIdx = (fbId != null && idToIdx.has(String(fbId)))
+                ? idToIdx.get(String(fbId)) : 0;
+            const tn = bgIdxToNum(fbIdx);
+            compositeCache.set(key, tn);
+            return tn;
+        }
+
+        const tileNum = nextCompositeTileNum++;
+        compositeCache.set(key, tileNum);
+
+        /* Resolve the two source tiles. Ground defaults to BG[0] when
+           absent so an overlay-only cell still composites onto the
+           default floor instead of palette[0] black. */
+        const groundTile  = (groundId != null && idToIdx.has(String(groundId)))
+            ? liveTiles[idToIdx.get(String(groundId))]
+            : liveTiles[0];
+        const overlayTile = (overlayId != null && idToIdx.has(String(overlayId)))
+            ? liveTiles[idToIdx.get(String(overlayId))]
+            : null;
+        const groundPx  = getTilePx(groundTile);
+        const overlayPx = overlayTile ? getTilePx(overlayTile) : null;
+
+        const composedPx = [];
+        for (let y = 0; y < 8; y++) {
+            const row = [];
+            for (let x = 0; x < 8; x++) {
+                const ov = overlayPx && overlayPx[y] && overlayPx[y][x];
+                if (ov && ov !== 'transparent') {
+                    row.push(ov);
+                } else {
+                    const gr = groundPx[y] && groundPx[y][x];
+                    row.push(gr || palette[0]);
+                }
+            }
+            composedPx.push(row);
+        }
+
+        tileBuf.push(...encodeBGTile(composedPx, palette));
+        /* Collision follows the overlay if present (TRS routes all
+           collision tiles into overlay), else the ground. */
+        const colliding = (overlayTile && overlayTile.collision) ||
+                          (overlayTile == null && groundTile && groundTile.collision);
+        const attr = colliding ? 0x0001 : 0;
+        attrBuf.push(attr & 0xFF, (attr >> 8) & 0xFF);
+        return tileNum;
+    }
+
     const mapFiles = [];
     for (let r = 0; r < 9; r++) {
         const tm = tilesetMaps[r] || null;
@@ -885,14 +959,28 @@ async function buildSMSRom() {
                 }
                 const ov = overlay[row] && overlay[row][col];
                 const gr = ground[row]  && ground[row][col];
-                const tid = (ov != null) ? ov : (gr != null) ? gr : null;
-                const idx = (tid != null && idToIdx.has(String(tid)))
-                    ? idToIdx.get(String(tid)) : 0;
-                bytes.push(bgIdxToNum(idx));
+                let tn;
+                if (ov != null && gr != null) {
+                    /* Both layers — composite, dedup-cached. */
+                    tn = getCompositeTileNum(gr, ov);
+                } else if (ov != null) {
+                    /* Overlay only — composite onto BG[0] so its
+                       transparent pixels show the default floor. */
+                    tn = getCompositeTileNum(null, ov);
+                } else if (gr != null) {
+                    const idx = idToIdx.has(String(gr)) ? idToIdx.get(String(gr)) : 0;
+                    tn = bgIdxToNum(idx);
+                } else {
+                    tn = bgIdxToNum(0);
+                }
+                bytes.push(tn);
             }
         }
         mapFiles.push({ name:`level${String(r+1).padStart(3,'0')}.map`,
             content:[...u16(r+1),...u16(8),...u16(8),...strBytes(`Room ${r+1}`,32),...bytes] });
+    }
+    if (compositeCache.size > 0) {
+        console.log('[SMS] Composite tiles: ' + compositeCache.size + ' unique (ground+overlay) pair(s) generated');
     }
 
     /* ── entities.dat ──
