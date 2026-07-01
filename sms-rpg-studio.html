@@ -2175,5 +2175,379 @@ else wireSmsButton();
 
 </script>
 
+<script>
+(function() { /* SMS-RPG-STUDIO SAVE/LOAD PATCH */
+    'use strict';
+
+    // ============================================================
+    // 1. PATCH history.replaceState — always rewrite a wrong-origin
+    //    URL to the current location, preserving search + hash.
+    //    TRS's ShareUrlHelper.getBaseUrl hard-codes the GitHub Pages
+    //    host for non-localhost origins, so its replaceState call
+    //    would otherwise silently throw a SecurityError.
+    // ============================================================
+    const origReplaceState = history.replaceState.bind(history);
+    history.replaceState = function(state, title, url) {
+        if (typeof url === 'string' && url) {
+            try {
+                const parsed = new URL(url, location.href);
+                if (parsed.origin !== location.origin || parsed.pathname !== location.pathname) {
+                    url = location.pathname + parsed.search + parsed.hash;
+                }
+            } catch (_) { /* keep original on parse error */ }
+        }
+        return origReplaceState(state, title, url);
+    };
+
+    // Same rewrite for arbitrary URL strings (used by the input setter +
+    // clipboard patches below).
+    function rewriteHostInUrl(text) {
+        if (typeof text !== 'string' || !/^https?:\/\//.test(text)) return text;
+        try {
+            const u = new URL(text);
+            if (u.origin !== location.origin || u.pathname !== location.pathname) {
+                return location.origin + location.pathname + u.search + u.hash;
+            }
+        } catch (_) {}
+        return text;
+    }
+
+    // ============================================================
+    // 2. PATCH the share URL <input>'s value setter — any time the
+    //    editor writes the field, the wrong-host URL gets rewritten
+    //    in-place so getShareUrl() reads the corrected version.
+    // ============================================================
+    function patchShareUrlInput() {
+        const input = document.getElementById('project-share-url');
+        if (!input || input._hostPatched) return;
+        const proto = HTMLInputElement.prototype;
+        const origDesc = Object.getOwnPropertyDescriptor(proto, 'value');
+        if (!origDesc) return;
+        input._hostPatched = true;
+        Object.defineProperty(input, 'value', {
+            configurable: true,
+            get() { return origDesc.get.call(this); },
+            set(v) { origDesc.set.call(this, rewriteHostInUrl(v)); }
+        });
+        // Rewrite anything that was already in the field before the patch ran.
+        if (input.value) input.value = input.value;
+    }
+
+    // ============================================================
+    // 3. PATCH navigator.clipboard.writeText —
+    //    a) Suppress copy when triggered by the Save flow.
+    //    b) On failure, fall back to a copyable popup instead of
+    //       letting the error bubble into the editor's "generate
+    //       failed" alert.
+    // ============================================================
+    let suppressClipboard = false;
+    let clipboardArmTimer = null;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        const origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+        navigator.clipboard.writeText = function(text) {
+            const corrected = rewriteHostInUrl(text);
+            if (suppressClipboard) {
+                suppressClipboard = false;
+                if (clipboardArmTimer) { clearTimeout(clipboardArmTimer); clipboardArmTimer = null; }
+                return Promise.resolve();
+            }
+            return origWriteText(corrected).catch(() => {
+                openCopyFallbackPopup(corrected);
+                return undefined;  // swallow the error so the editor's outer
+                                   // try/catch doesn't show its own alert
+            });
+        };
+    }
+    // The Save button dispatches 'request-share-url' which kicks off
+    // generateShareableUrl. Arm the suppression flag so the writeText
+    // call inside that flow is skipped (save = URL update only, no copy).
+    document.addEventListener('request-share-url', () => {
+        suppressClipboard = true;
+        if (clipboardArmTimer) clearTimeout(clipboardArmTimer);
+        clipboardArmTimer = setTimeout(() => { suppressClipboard = false; }, 5000);
+    }, true);  // capture: runs before the editor's own listeners
+
+    // ============================================================
+    // 4. MODAL helpers — minimal in-line styling, matches the
+    //    editor's dark-panel palette (var(--panel), var(--border)).
+    // ============================================================
+    function makeModal(title) {
+        const backdrop = document.createElement('div');
+        backdrop.style.cssText =
+            'position:fixed;inset:0;background:#0008;z-index:99999;' +
+            'display:flex;align-items:center;justify-content:center;';
+        backdrop.addEventListener('click', e => {
+            if (e.target === backdrop) document.body.removeChild(backdrop);
+        });
+
+        const modal = document.createElement('div');
+        modal.style.cssText =
+            'background:#11151d;border:4px solid #2a2f3a;padding:18px;' +
+            'border-radius:4px;max-width:90vw;width:540px;max-height:90vh;' +
+            'overflow:auto;color:#fff;font-family:monospace;box-sizing:border-box;';
+
+        const titleEl = document.createElement('div');
+        titleEl.textContent = title;
+        titleEl.style.cssText = 'font-weight:bold;margin-bottom:12px;font-size:15px;letter-spacing:1px;';
+        modal.appendChild(titleEl);
+
+        backdrop.appendChild(modal);
+        document.body.appendChild(backdrop);
+        return { backdrop, modal, close: () => { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); } };
+    }
+
+    const BTN_STYLE = 'padding:8px 14px;background:#141a24;border:2px solid #2a2f3a;color:#fff;cursor:pointer;font-family:monospace;letter-spacing:1px;';
+    const BTN_PRIMARY = BTN_STYLE.replace('#2a2f3a', '#5bfa8e');
+    const TA_STYLE = 'width:100%;background:#0b0d12;color:#fff;border:2px solid #2a2f3a;padding:8px;font-family:monospace;font-size:11px;resize:vertical;box-sizing:border-box;';
+
+    function openCopyFallbackPopup(text) {
+        const { modal, close } = makeModal('Copy manually');
+        const info = document.createElement('div');
+        info.textContent = "The browser blocked clipboard access. Copy the text below manually:";
+        info.style.cssText = 'margin-bottom:8px;font-size:12px;color:#aaa;';
+        modal.appendChild(info);
+        const ta = document.createElement('textarea');
+        ta.value = text || '';
+        ta.readOnly = true;
+        ta.style.cssText = TA_STYLE + 'height:140px;';
+        modal.appendChild(ta);
+        ta.focus(); ta.select();
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'margin-top:12px;display:flex;gap:8px;justify-content:flex-end;';
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = 'Close';
+        closeBtn.style.cssText = BTN_STYLE;
+        closeBtn.addEventListener('click', close);
+        btnRow.appendChild(closeBtn);
+        modal.appendChild(btnRow);
+    }
+
+    // ============================================================
+    // 5. EXPORT popup — URL or formatted JSON
+    // ============================================================
+    function generateShareUrlAndWait() {
+        // Same handshake the Save button uses — kick off URL generation
+        // and resolve once the share field has a fresh value.
+        suppressClipboard = true;  // belt-and-braces: don't copy during export prep
+        if (clipboardArmTimer) clearTimeout(clipboardArmTimer);
+        clipboardArmTimer = setTimeout(() => { suppressClipboard = false; }, 5000);
+        return new Promise(resolve => {
+            const onReady = () => resolve();
+            document.addEventListener('share-url-ready', onReady, { once: true });
+            // Timeout in case nobody answers (e.g. editor not fully booted).
+            setTimeout(() => {
+                document.removeEventListener('share-url-ready', onReady);
+                resolve();
+            }, 2000);
+            document.dispatchEvent(new CustomEvent('request-share-url'));
+        });
+    }
+
+    async function openExportPopup() {
+        await generateShareUrlAndWait();
+        const urlField = document.getElementById('project-share-url');
+        const url = rewriteHostInUrl((urlField && urlField.value) || '');
+        let json = '';
+        try {
+            const data = (window.TinyRPGMaker && window.TinyRPGMaker.exportGameData)
+                ? window.TinyRPGMaker.exportGameData() : null;
+            json = data ? JSON.stringify(data, null, 2) : '';
+        } catch (e) {
+            json = '/* failed to export game data: ' + (e && e.message) + ' */';
+        }
+
+        const { modal, close } = makeModal('Export game');
+
+        const tabsRow = document.createElement('div');
+        tabsRow.style.cssText = 'display:flex;gap:4px;margin-bottom:12px;';
+        const urlTab = document.createElement('button');
+        urlTab.textContent = 'URL'; urlTab.type = 'button';
+        const jsonTab = document.createElement('button');
+        jsonTab.textContent = 'JSON'; jsonTab.type = 'button';
+        tabsRow.appendChild(urlTab); tabsRow.appendChild(jsonTab);
+        modal.appendChild(tabsRow);
+
+        const ta = document.createElement('textarea');
+        ta.readOnly = true;
+        ta.style.cssText = TA_STYLE + 'height:240px;';
+        modal.appendChild(ta);
+
+        function setTab(which) {
+            const activeStyle = BTN_STYLE.replace('#2a2f3a', '#5bfa8e').replace('#141a24', '#1f2735');
+            urlTab.style.cssText = which === 'url' ? activeStyle : BTN_STYLE;
+            jsonTab.style.cssText = which === 'json' ? activeStyle : BTN_STYLE;
+            ta.value = which === 'url' ? url : json;
+            ta.style.height = which === 'json' ? '320px' : '140px';
+            setTimeout(() => { ta.focus(); ta.select(); }, 0);
+        }
+        urlTab.addEventListener('click', () => setTab('url'));
+        jsonTab.addEventListener('click', () => setTab('json'));
+        setTab('url');
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'margin-top:12px;display:flex;gap:8px;justify-content:flex-end;';
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Copy';
+        copyBtn.type = 'button';
+        copyBtn.style.cssText = BTN_PRIMARY;
+        copyBtn.addEventListener('click', async () => {
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(ta.value);
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+                } else {
+                    ta.focus(); ta.select();
+                    document.execCommand && document.execCommand('copy');
+                }
+            } catch (_) {
+                openCopyFallbackPopup(ta.value);
+            }
+        });
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = 'Close';
+        closeBtn.type = 'button';
+        closeBtn.style.cssText = BTN_STYLE;
+        closeBtn.addEventListener('click', close);
+        btnRow.appendChild(copyBtn);
+        btnRow.appendChild(closeBtn);
+        modal.appendChild(btnRow);
+    }
+
+    // ============================================================
+    // 6. IMPORT popup — paste TRS URL or JSON
+    //    JSON → window.TinyRPGMaker.importGameData(data) in-memory.
+    //    URL  → extract the hash code and reload with current host,
+    //           since the editor only decodes the hash at boot time.
+    // ============================================================
+    function extractHashFromInput(text) {
+        const s = text.trim();
+        if (!s) return '';
+        if (/^https?:\/\//i.test(s)) {
+            try {
+                const u = new URL(s);
+                return u.hash.startsWith('#') ? u.hash.substring(1) : u.hash;
+            } catch (_) { return ''; }
+        }
+        if (s.startsWith('#')) return s.substring(1);
+        // Bare share code looks like 'v3.gXX.oYY...' — base64url + dots.
+        if (/^[A-Za-z0-9+/=_.\-]+$/.test(s) && s.includes('.')) return s;
+        return '';
+    }
+
+    function openImportPopup() {
+        const { modal, close } = makeModal('Import game');
+
+        const info = document.createElement('div');
+        info.textContent = 'Paste a Tiny-RPG-Studio share URL or a game JSON below:';
+        info.style.cssText = 'margin-bottom:8px;font-size:12px;color:#aaa;';
+        modal.appendChild(info);
+
+        const ta = document.createElement('textarea');
+        ta.placeholder = 'https://...#v3.gXX.oYY...\n— OR —\n{ "title": ..., "tileset": ... }';
+        ta.style.cssText = TA_STYLE + 'height:240px;';
+        modal.appendChild(ta);
+
+        const errEl = document.createElement('div');
+        errEl.style.cssText = 'margin-top:6px;font-size:11px;color:#ff6;min-height:14px;';
+        modal.appendChild(errEl);
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'margin-top:12px;display:flex;gap:8px;justify-content:flex-end;';
+        const importBtn = document.createElement('button');
+        importBtn.textContent = 'Import';
+        importBtn.type = 'button';
+        importBtn.style.cssText = BTN_PRIMARY;
+        importBtn.addEventListener('click', () => {
+            const raw = ta.value.trim();
+            errEl.textContent = '';
+            if (!raw) { errEl.textContent = 'Paste a URL or JSON first.'; return; }
+
+            // JSON first — most explicit signal
+            const looksLikeJson = raw.startsWith('{') || raw.startsWith('[');
+            if (looksLikeJson) {
+                let data;
+                try { data = JSON.parse(raw); }
+                catch (e) { errEl.textContent = 'Invalid JSON: ' + e.message; return; }
+                if (window.TinyRPGMaker && window.TinyRPGMaker.importGameData) {
+                    try {
+                        window.TinyRPGMaker.importGameData(data);
+                        close();
+                    } catch (e) {
+                        errEl.textContent = 'Import failed: ' + e.message;
+                    }
+                } else {
+                    errEl.textContent = 'window.TinyRPGMaker.importGameData not available.';
+                }
+                return;
+            }
+
+            // URL / hash code
+            const hash = extractHashFromInput(raw);
+            if (!hash) {
+                errEl.textContent = "Couldn't detect a URL or JSON in the input.";
+                return;
+            }
+            // The editor decodes the URL hash at boot, so set the hash and
+            // force a reload to let it pick the new game up.
+            window.location.hash = hash;
+            window.location.reload();
+        });
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = 'Cancel';
+        closeBtn.type = 'button';
+        closeBtn.style.cssText = BTN_STYLE;
+        closeBtn.addEventListener('click', close);
+        btnRow.appendChild(importBtn);
+        btnRow.appendChild(closeBtn);
+        modal.appendChild(btnRow);
+
+        setTimeout(() => ta.focus(), 0);
+    }
+
+    // ============================================================
+    // 7. INJECT Export and Import buttons alongside Save / Load
+    // ============================================================
+    function injectButtons() {
+        const container = document.querySelector('.project-save-controls');
+        if (!container || container._extPatched) return;
+        container._extPatched = true;
+
+        const mkBtn = (text, title, handler) => {
+            const b = document.createElement('button');
+            b.textContent = text;
+            b.type = 'button';
+            b.className = 'btn-manual-save';  // reuse existing styling
+            b.title = title;
+            b.addEventListener('click', handler);
+            return b;
+        };
+        container.appendChild(mkBtn('Export', 'Export game as URL or JSON', openExportPopup));
+        container.appendChild(mkBtn('Import', 'Import game from URL or JSON', openImportPopup));
+    }
+
+    // ============================================================
+    // INIT — wait until the editor's DOM is in place
+    // ============================================================
+    function init() {
+        patchShareUrlInput();
+        injectButtons();
+    }
+    // Retry a couple times in case the editor builds its controls late.
+    function pollInit(remaining) {
+        init();
+        const haveButton = document.querySelector('.project-save-controls') &&
+                           document.querySelector('.project-save-controls')._extPatched;
+        if (haveButton || remaining <= 0) return;
+        setTimeout(() => pollInit(remaining - 1), 250);
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => pollInit(20));
+    } else {
+        pollInit(20);
+    }
+})();
+</script>
+
 </body>
 </html>
